@@ -136,9 +136,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--plan", help="Path to a local JSON execution plan")
     parser.add_argument("--plan-json", help="Inline JSON execution plan supplied by a Job parameter")
+    parser.add_argument("--warehouse-id", help="SQL warehouse for plan execution")
+    parser.add_argument("--allowed-roots", help="Comma-separated workspace write roots")
     args = parser.parse_args()
     if bool(args.plan) == bool(args.plan_json):
         parser.error("provide exactly one of --plan or --plan-json")
+    if args.warehouse_id:
+        os.environ["SQL_WAREHOUSE_ID"] = args.warehouse_id
+    if args.allowed_roots:
+        os.environ["EXECUTION_ALLOWED_ROOTS"] = args.allowed_roots
     if args.plan_json:
         plan = json.loads(args.plan_json)
     else:

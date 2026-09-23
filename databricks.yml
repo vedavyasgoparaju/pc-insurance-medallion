@@ -8,6 +8,16 @@ bundle:
 include:
   - resources/*.yml
 
+variables:
+  sql_warehouse_id:
+    default: 670b9d31fd290bb2
+  supervisor_endpoint:
+    default: mas-0bcacd94-endpoint
+  workspace_root:
+    default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel
+  allowed_roots:
+    default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel,/Users/vedavyas.goparaju@gmail.com/Supervisor_Agent_Setup
+
 targets:
   dev:
     mode: development
@@ -15,8 +25,12 @@ targets:
     workspace:
       host: https://dbc-ec4d2e3d-58c3.cloud.databricks.com
 
-  ## Optionally, there could be 'staging' or 'prod' targets here.
-  #
-  # prod:
-  #   workspace:
-  #     host: https://dbc-ec4d2e3d-58c3.cloud.databricks.com
+  staging:
+    mode: production
+    workspace:
+      profile: staging
+
+  prod:
+    mode: production
+    workspace:
+      profile: prod

@@ -14,6 +14,7 @@ from plan_executor import _single_statement, _workspace_path
 
 SUPERVISOR_ENDPOINT = os.getenv("SUPERVISOR_ENDPOINT", "mas-0bcacd94-endpoint")
 WAREHOUSE_ID = os.getenv("SQL_WAREHOUSE_ID", "670b9d31fd290bb2")
+WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/Users/vedavyas.goparaju@gmail.com/InsuranceModel")
 REQUEST_TABLE = "pc_insurance.reference.agent_requests"
 
 
@@ -60,7 +61,7 @@ def _request_plan(client: WorkspaceClient, request: str) -> dict[str, Any]:
     prompt = f"""Convert this request into an execution plan for the P&C Insurance Medallion project.
 Return ONLY valid JSON with this shape: {{\"version\":1,\"request_id\":\"...\",\"operations\":[...]}}.
 Allowed operation types are write_workspace_file, execute_sql, run_notebook, and git_commit.
-Use only paths below /Users/vedavyas.goparaju@gmail.com/InsuranceModel or /Users/vedavyas.goparaju@gmail.com/Supervisor_Agent_Setup.
+Use only paths below {WORKSPACE_ROOT}.
 Do not call tools. Do not return Markdown or explanations.
 User request: {request}"""
     response = client._api_client.do(
@@ -139,10 +140,18 @@ def _wait_for_run(client: WorkspaceClient, run_id: int) -> dict[str, Any]:
 
 
 def main() -> None:
+    global SUPERVISOR_ENDPOINT, WAREHOUSE_ID, WORKSPACE_ROOT
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", default="")
     parser.add_argument("--execution-job-id", type=int, required=True)
+    parser.add_argument("--supervisor-endpoint", default=SUPERVISOR_ENDPOINT)
+    parser.add_argument("--warehouse-id", default=WAREHOUSE_ID)
+    parser.add_argument("--workspace-root", default=WORKSPACE_ROOT)
     args = parser.parse_args()
+
+    SUPERVISOR_ENDPOINT = args.supervisor_endpoint
+    WAREHOUSE_ID = args.warehouse_id
+    WORKSPACE_ROOT = args.workspace_root
 
     client = WorkspaceClient()
     if args.request.strip():

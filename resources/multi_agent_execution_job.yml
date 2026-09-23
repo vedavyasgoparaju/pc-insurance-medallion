@@ -6,6 +6,10 @@ resources:
       parameters:
         - name: execution_plan
           default: '{"version":1,"operations":[]}'
+        - name: warehouse_id
+          default: ${var.sql_warehouse_id}
+        - name: allowed_roots
+          default: ${var.allowed_roots}
       tasks:
         - task_key: execute_plan
           spark_python_task:
@@ -13,6 +17,10 @@ resources:
             parameters:
               - --plan-json
               - "{{job.parameters.execution_plan}}"
+              - --warehouse-id
+              - "{{job.parameters.warehouse_id}}"
+              - --allowed-roots
+              - "{{job.parameters.allowed_roots}}"
           environment_key: serverless
       environments:
         - environment_key: serverless
@@ -30,7 +38,13 @@ resources:
         - name: request
           default: ""
         - name: execution_job_id
-          default: "781149884995675"
+          default: ${resources.jobs.multi_agent_execution.id}
+        - name: supervisor_endpoint
+          default: ${var.supervisor_endpoint}
+        - name: warehouse_id
+          default: ${var.sql_warehouse_id}
+        - name: workspace_root
+          default: ${var.workspace_root}
       tasks:
         - task_key: orchestrate_request
           spark_python_task:
@@ -40,6 +54,12 @@ resources:
               - "{{job.parameters.request}}"
               - --execution-job-id
               - "{{job.parameters.execution_job_id}}"
+              - --supervisor-endpoint
+              - "{{job.parameters.supervisor_endpoint}}"
+              - --warehouse-id
+              - "{{job.parameters.warehouse_id}}"
+              - --workspace-root
+              - "{{job.parameters.workspace_root}}"
           environment_key: serverless
       environments:
         - environment_key: serverless
