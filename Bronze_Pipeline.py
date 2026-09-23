@@ -1,273 +1,131 @@
 # Databricks notebook source
-# DBTITLE 1,Bronze Pipeline - P&C Insurance Data Ingestion
-# MAGIC %md
-# MAGIC # Bronze Layer Pipeline - P&C Insurance
-# MAGIC
-# MAGIC This notebook ingests raw P&C insurance data into the Bronze layer using:
-# MAGIC * **Auto Loader** for streaming ingestion from cloud storage
-# MAGIC * **Batch ingestion** for one-time loads
-# MAGIC * **Data validation** with DQ functions
-# MAGIC
-# MAGIC ## Data Sources
-# MAGIC * Policy Admin System → `bronze.policies_raw`
-# MAGIC * Claims Management System → `bronze.claims_raw`
-# MAGIC * Billing System → `bronze.premiums_raw`
-# MAGIC * CRM → `bronze.customers_raw`
-# MAGIC * Reference data → `bronze.agents_raw`, `bronze.coverage_codes_raw`
-# MAGIC
-# MAGIC ## Architecture Pattern
-# MAGIC * **ELT**: Extract raw data, load as-is, transform later in Silver
-# MAGIC * **Immutable**: Never update Bronze records, append only
-# MAGIC * **Schema evolution**: Capture schema changes in raw_payload JSON column
+# ============================================
+# BRONZE PIPELINE - Auto Loader Ingestion from CSV Source Files
+# ============================================
+# 
+# This notebook ingests P&C insurance data from CSV source files stored in
+# a Unity Catalog volume using Databricks Auto Loader (cloudFiles).
+# 
+# Source Files (UC Volume: pc_insurance.reference.raw_sources):
+#   policies/  <- Policy Admin System exports (policy_admin_system)
+#   claims/    <- Claims Management System exports (claims_system)
+#   premiums/  <- Billing System exports (billing_system)
+#   customers/ <- CRM exports (crm)
+#   agents/    <- Agent Admin Portal exports (agent_admin)
+#
+# Auto Loader monitors each directory for new files and incrementally loads
+# them into Bronze Delta tables with ingestion metadata (source_system, 
+# ingestion_timestamp).
+# ============================================
 
-# COMMAND ----------
-
-# DBTITLE 1,Configuration
-# Configuration for Bronze pipeline
-import datetime
-
-# Catalog and schema
-CATALOG = "pc_insurance"
-BRONZE_SCHEMA = "bronze"
-
-# Source paths (example - adjust for your cloud storage)
-SOURCE_BUCKET = "s3://your-bucket/pc-insurance/raw"
-CHECKPOINT_PATH = "/tmp/checkpoints/bronze"
-
-# Ingestion timestamp
-ingestion_timestamp = datetime.datetime.now()
-
-print(f"Bronze Pipeline Configuration")
-print(f"Catalog: {CATALOG}")
-print(f"Schema: {BRONZE_SCHEMA}")
-print(f"Source: {SOURCE_BUCKET}")
-print(f"Ingestion Time: {ingestion_timestamp}")
-
-# COMMAND ----------
-
-# DBTITLE 1,Sample Data Generation
-# Generate sample P&C insurance data for demonstration
 from pyspark.sql import functions as F
 from pyspark.sql.types import *
-import random
 
-# Generate sample policies
-num_policies = 1000
+CATALOG = "pc_insurance"
+BRONZE = "bronze"
+VOLUME = "/Volumes/pc_insurance/reference/raw_sources"
 
-policies_data = [
-    (
-        f"POL-{i:06d}",
-        f"PN-{i:08d}",
-        random.choice(["Active", "Expired", "Cancelled", "Lapsed"]),
-        random.choice(["Auto", "Home", "Property", "Commercial"]),
-        random.choice(["Personal Auto", "Homeowners", "Commercial Property", "General Liability"]),
-        f"CUST-{random.randint(1, 500):05d}",
-        f"AGT-{random.randint(1, 50):03d}",
-        (datetime.date(2023, 1, 1) + datetime.timedelta(days=random.randint(0, 365))),
-        (datetime.date(2024, 1, 1) + datetime.timedelta(days=random.randint(0, 365))),
-        round(random.uniform(500, 5000), 2),
-        round(random.uniform(100000, 1000000), 2),
-        round(random.uniform(500, 2000), 2),
-        random.choice(["CA", "TX", "NY", "FL", "IL"]),
-        f"T{random.randint(1, 20):02d}",
-        random.randint(0, 5),
-        None if random.random() > 0.2 else (datetime.date(2024, 1, 1) + datetime.timedelta(days=random.randint(0, 180))),
-        None if random.random() > 0.2 else random.choice(["Non-payment", "Request", "Underwriting"]),
-        "policy_admin_system",
-        ingestion_timestamp,
-        None
+# ============================================
+# Source Schemas (matching CSV column structure)
+# ============================================
+schemas = {
+    "policies": StructType([
+        StructField("policy_id", StringType(), False), StructField("policy_number", StringType()),
+        StructField("policy_status", StringType()), StructField("policy_type", StringType()),
+        StructField("line_of_business", StringType()), StructField("customer_id", StringType()),
+        StructField("agent_id", StringType()), StructField("effective_date", DateType()),
+        StructField("expiry_date", DateType()), StructField("premium_amount", DecimalType(12,2)),
+        StructField("coverage_limit", DecimalType(12,2)), StructField("deductible", DecimalType(10,2)),
+        StructField("state", StringType()), StructField("territory_code", StringType()),
+        StructField("endorsement_count", IntegerType()), StructField("cancellation_date", DateType()),
+        StructField("cancellation_reason", StringType()),
+    ]),
+    "claims": StructType([
+        StructField("claim_id", StringType(), False), StructField("claim_number", StringType()),
+        StructField("policy_id", StringType()), StructField("customer_id", StringType()),
+        StructField("claim_type", StringType()), StructField("claim_status", StringType()),
+        StructField("loss_date", DateType()), StructField("report_date", DateType()),
+        StructField("close_date", DateType()), StructField("incurred_loss", DecimalType(12,2)),
+        StructField("paid_loss", DecimalType(12,2)), StructField("reserved_amount", DecimalType(12,2)),
+        StructField("expense_amount", DecimalType(12,2)), StructField("deductible_applied", DecimalType(10,2)),
+        StructField("subrogation_amount", DecimalType(12,2)), StructField("adjuster_id", StringType()),
+        StructField("fraud_flag", BooleanType()), StructField("litigation_flag", BooleanType()),
+    ]),
+    "premiums": StructType([
+        StructField("transaction_id", StringType(), False), StructField("policy_id", StringType()),
+        StructField("customer_id", StringType()), StructField("transaction_type", StringType()),
+        StructField("transaction_date", DateType()), StructField("premium_amount", DecimalType(12,2)),
+        StructField("written_premium", DecimalType(12,2)), StructField("earned_premium", DecimalType(12,2)),
+        StructField("unearned_premium", DecimalType(12,2)), StructField("commission_amount", DecimalType(12,2)),
+        StructField("payment_frequency", StringType()), StructField("billing_status", StringType()),
+    ]),
+    "customers": StructType([
+        StructField("customer_id", StringType(), False), StructField("customer_name", StringType()),
+        StructField("customer_type", StringType()), StructField("date_of_birth", DateType()),
+        StructField("gender", StringType()), StructField("address_line1", StringType()),
+        StructField("address_line2", StringType()), StructField("city", StringType()),
+        StructField("state", StringType()), StructField("zip_code", StringType()),
+        StructField("phone", StringType()), StructField("email", StringType()),
+        StructField("credit_score", IntegerType()), StructField("occupation", StringType()),
+        StructField("annual_income", DecimalType(12,2)), StructField("years_with_company", IntegerType()),
+    ]),
+    "agents": StructType([
+        StructField("agent_id", StringType(), False), StructField("agent_name", StringType()),
+        StructField("agency_name", StringType()), StructField("agent_license_number", StringType()),
+        StructField("license_state", StringType()), StructField("agent_status", StringType()),
+        StructField("commission_rate", DecimalType(5,2)), StructField("appointment_date", DateType()),
+    ]),
+}
+
+source_systems = {
+    "policies": "policy_admin_system",
+    "claims": "claims_system",
+    "premiums": "billing_system",
+    "customers": "crm",
+    "agents": "agent_admin",
+}
+
+# ============================================
+# Auto Loader Ingestion (batch mode via trigger(availableNow=True))
+# ============================================
+print("=== Bronze Pipeline: Auto Loader Ingestion ===")
+print(f"Source: UC Volume {VOLUME}")
+print(f"Target: {CATALOG}.{BRONZE}.*_raw tables")
+print()
+
+for source_name, schema in schemas.items():
+    table_name = source_name + "_raw"
+    source_dir = VOLUME + "/" + source_name + "/"
+    full_table = CATALOG + "." + BRONZE + "." + table_name
+    
+    print(f"[{table_name}] Loading from {source_dir}")
+    
+    # Auto Loader: reads CSV files from source directory
+    df = (spark.readStream
+        .format("cloudFiles")
+        .option("cloudFiles.format", "csv")
+        .option("cloudFiles.schemaLocation", VOLUME + "/_schemas/" + source_name)
+        .option("header", "true")
+        .schema(schema)
+        .load(source_dir)
+        .withColumn("source_system", F.lit(source_systems[source_name]))
+        .withColumn("ingestion_timestamp", F.current_timestamp())
     )
-    for i in range(1, num_policies + 1)
-]
-
-policies_df = spark.createDataFrame(policies_data, schema="""
-    policy_id STRING,
-    policy_number STRING,
-    policy_status STRING,
-    policy_type STRING,
-    line_of_business STRING,
-    customer_id STRING,
-    agent_id STRING,
-    effective_date DATE,
-    expiry_date DATE,
-    premium_amount DECIMAL(12,2),
-    coverage_limit DECIMAL(12,2),
-    deductible DECIMAL(10,2),
-    state STRING,
-    territory_code STRING,
-    endorsement_count INT,
-    cancellation_date DATE,
-    cancellation_reason STRING,
-    source_system STRING,
-    ingestion_timestamp TIMESTAMP,
-    raw_payload STRING
-""")
-
-print(f"Generated {policies_df.count()} sample policies")
-policies_df.show(5, truncate=False)
-
-# COMMAND ----------
-
-# DBTITLE 1,Ingest Policies to Bronze
-# Write policies to Bronze layer
-policies_df.write \
-    .format("delta") \
-    .mode("append") \
-    .saveAsTable(f"{CATALOG}.{BRONZE_SCHEMA}.policies_raw")
-
-print(f"✓ Ingested {policies_df.count()} policies to bronze.policies_raw")
-
-# Verify
-result = spark.sql(f"SELECT COUNT(*) as policy_count FROM {CATALOG}.{BRONZE_SCHEMA}.policies_raw")
-result.show()
-
-# COMMAND ----------
-
-# DBTITLE 1,Generate Sample Claims Data
-# Generate sample claims (about 30% of policies have claims)
-num_claims = 300
-
-claims_data = [
-    (
-        f"CLM-{i:06d}",
-        f"CN-{i:08d}",
-        f"POL-{random.randint(1, num_policies):06d}",
-        f"CUST-{random.randint(1, 500):05d}",
-        random.choice(["Auto", "Property", "Liability", "Workers Comp"]),
-        random.choice(["Open", "Closed", "Reopened", "Denied", "Pending"]),
-        (datetime.date(2023, 6, 1) + datetime.timedelta(days=random.randint(0, 365))),
-        (datetime.date(2023, 6, 1) + datetime.timedelta(days=random.randint(0, 400))),
-        None if random.random() > 0.6 else (datetime.date(2024, 1, 1) + datetime.timedelta(days=random.randint(0, 180))),
-        round(random.uniform(1000, 50000), 2),
-        round(random.uniform(500, 40000), 2),
-        round(random.uniform(1000, 10000), 2),
-        round(random.uniform(500, 5000), 2),
-        round(random.uniform(0, 2000), 2),
-        round(random.uniform(0, 5000), 2) if random.random() > 0.8 else 0,
-        f"ADJ-{random.randint(1, 20):03d}",
-        random.choice([True, False]),
-        random.choice([True, False]),
-        "claims_system",
-        ingestion_timestamp,
-        None
+    
+    # Write to Bronze table (batch mode - processes available files and stops)
+    query = (df.writeStream
+        .format("delta")
+        .option("mergeSchema", "true")
+        .option("checkpointLocation", VOLUME + "/_checkpoints/" + source_name)
+        .trigger(availableNow=True)
+        .toTable(full_table)
     )
-    for i in range(1, num_claims + 1)
-]
+    
+    query.awaitTermination()
+    count = spark.sql("SELECT COUNT(*) FROM " + full_table).collect()[0][0]
+    print(f"  -> {count} rows ingested from {source_systems[source_name]}")
 
-claims_df = spark.createDataFrame(claims_data, schema="""
-    claim_id STRING,
-    claim_number STRING,
-    policy_id STRING,
-    customer_id STRING,
-    claim_type STRING,
-    claim_status STRING,
-    loss_date DATE,
-    report_date DATE,
-    close_date DATE,
-    incurred_loss DECIMAL(12,2),
-    paid_loss DECIMAL(12,2),
-    reserved_amount DECIMAL(12,2),
-    expense_amount DECIMAL(12,2),
-    deductible_applied DECIMAL(10,2),
-    subrogation_amount DECIMAL(12,2),
-    adjuster_id STRING,
-    fraud_flag BOOLEAN,
-    litigation_flag BOOLEAN,
-    source_system STRING,
-    ingestion_timestamp TIMESTAMP,
-    raw_payload STRING
-""")
-
-print(f"Generated {claims_df.count()} sample claims")
-claims_df.show(5, truncate=False)
-
-# COMMAND ----------
-
-# DBTITLE 1,Ingest Claims to Bronze
-# Write claims to Bronze layer
-claims_df.write \
-    .format("delta") \
-    .mode("append") \
-    .saveAsTable(f"{CATALOG}.{BRONZE_SCHEMA}.claims_raw")
-
-print(f"✓ Ingested {claims_df.count()} claims to bronze.claims_raw")
-
-# Verify
-result = spark.sql(f"SELECT COUNT(*) as claim_count FROM {CATALOG}.{BRONZE_SCHEMA}.claims_raw")
-result.show()
-
-# COMMAND ----------
-
-# DBTITLE 1,Generate Sample Premiums Data
-# Generate premium transactions (one or more per policy)
-num_premiums = 1200
-
-premiums_data = [
-    (
-        f"TRX-{i:08d}",
-        f"POL-{random.randint(1, num_policies):06d}",
-        f"CUST-{random.randint(1, 500):05d}",
-        random.choice(["New Business", "Renewal", "Endorsement", "Cancel"]),
-        (datetime.date(2023, 1, 1) + datetime.timedelta(days=random.randint(0, 500))),
-        round(random.uniform(500, 5000), 2),
-        round(random.uniform(500, 5000), 2),
-        round(random.uniform(300, 4000), 2),
-        round(random.uniform(100, 1000), 2),
-        round(random.uniform(50, 500), 2),
-        random.choice(["Annual", "Semi-annual", "Quarterly", "Monthly"]),
-        random.choice(["Paid", "Pending", "Overdue"]),
-        "billing_system",
-        ingestion_timestamp
-    )
-    for i in range(1, num_premiums + 1)
-]
-
-premiums_df = spark.createDataFrame(premiums_data, schema="""
-    transaction_id STRING,
-    policy_id STRING,
-    customer_id STRING,
-    transaction_type STRING,
-    transaction_date DATE,
-    premium_amount DECIMAL(12,2),
-    written_premium DECIMAL(12,2),
-    earned_premium DECIMAL(12,2),
-    unearned_premium DECIMAL(12,2),
-    commission_amount DECIMAL(12,2),
-    payment_frequency STRING,
-    billing_status STRING,
-    source_system STRING,
-    ingestion_timestamp TIMESTAMP
-""")
-
-print(f"Generated {premiums_df.count()} premium transactions")
-premiums_df.show(5, truncate=False)
-
-# COMMAND ----------
-
-# DBTITLE 1,Ingest Premiums to Bronze
-# Write premiums to Bronze layer
-premiums_df.write \
-    .format("delta") \
-    .mode("append") \
-    .saveAsTable(f"{CATALOG}.{BRONZE_SCHEMA}.premiums_raw")
-
-print(f"✓ Ingested {premiums_df.count()} premiums to bronze.premiums_raw")
-
-# Verify
-result = spark.sql(f"SELECT COUNT(*) as premium_count FROM {CATALOG}.{BRONZE_SCHEMA}.premiums_raw")
-result.show()
-
-# COMMAND ----------
-
-# DBTITLE 1,Summary - Bronze Layer Ingestion Complete
-# MAGIC %sql
-# MAGIC -- Verify all Bronze tables have data
-# MAGIC SELECT 'policies_raw' AS table_name, COUNT(*) AS record_count FROM pc_insurance.bronze.policies_raw
-# MAGIC UNION ALL
-# MAGIC SELECT 'claims_raw', COUNT(*) FROM pc_insurance.bronze.claims_raw
-# MAGIC UNION ALL
-# MAGIC SELECT 'premiums_raw', COUNT(*) FROM pc_insurance.bronze.premiums_raw
-# MAGIC ORDER BY table_name;
-
-# COMMAND ----------
-
+print()
+print("=== Bronze Pipeline Complete ===")
+print("All source files ingested via Auto Loader.")
+print("To add new data: drop CSV files into the source directories and re-run this notebook.")
