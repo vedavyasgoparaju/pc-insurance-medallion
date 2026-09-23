@@ -232,7 +232,6 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
 ## Notebooks
 
 - `Bronze_Pipeline` - Metadata-driven Auto Loader ingestion (INITIAL + INCREMENTAL)
-- `Silver_Pipeline` - Original Silver pipeline (hardcoded transformations)
 - `Silver_Pipeline` - Silver transformations with metadata-controlled persistence and audit
 - `Silver_Pipeline_Metadata` - Metadata-driven Silver reference implementation
 - `Gold_Pipeline` - Metadata-driven KPI aggregations and audit
@@ -268,6 +267,21 @@ databricks bundle deploy -t staging \
 Use the same command with `-t prod` and production values for production. Hosts
 come from the configured Databricks CLI profiles; code does not contain target
 workspace credentials.
+
+## Architecture Documentation
+
+The newcomer-focused end-to-end architecture guide is available in both source
+and PDF form:
+
+- `docs/InsuranceModel_Architecture_Guide.md`
+- `docs/InsuranceModel_Architecture_Guide.pdf`
+
+To rebuild the PDF after editing the Markdown source:
+
+```bash
+uv pip install --python .venv/bin/python reportlab
+.venv/bin/python tools/build_architecture_pdf.py
+```
 
 ## KPI Formulas
 
