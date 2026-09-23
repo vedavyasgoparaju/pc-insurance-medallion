@@ -1,0 +1,15 @@
+{
+    "jupyter.interactiveWindow.cellMarker.codeRegex": "^# COMMAND ----------|^# Databricks notebook source|^(#\\s*%%|#\\s*\\<codecell\\>|#\\s*In\\[\\d*?\\]|#\\s*In\\[ \\])",
+    "jupyter.interactiveWindow.cellMarker.default": "# COMMAND ----------",
+    "chat.tools.terminal.autoApprove": {
+        "command": true,
+        "databricks": true,
+        "/^python - <<'PY'\nfrom databricks\\.sdk import WorkspaceClient\nw = WorkspaceClient\\(\\)\nprint\\(\\[name for name in dir\\(w\\.supervisor_agents\\) if not name\\.startswith\\('_'\\)\\]\\)\nprint\\(\\[name for name in dir\\(w\\.serving_endpoints\\) if 'query' in name\\.lower\\(\\) or 'get' in name\\.lower\\(\\)\\]\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        ".venv/bin/python": true,
+        "rsync": true,
+        "cp": true
+    }
+}

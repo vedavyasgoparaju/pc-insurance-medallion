@@ -20,6 +20,9 @@
 from pyspark.sql import functions as F
 from pyspark.sql.window import Window
 import datetime
+import json
+import random
+import uuid
 
 CATALOG = "pc_insurance"
 BRONZE = "bronze"
@@ -27,6 +30,46 @@ SILVER = "silver"
 
 now = F.current_timestamp()
 print("Silver Pipeline started at:", datetime.datetime.now())
+
+# Drive execution order and target persistence from the Silver control table.
+silver_configs = {
+    row["transformation_name"]: row.asDict()
+    for row in spark.table(f"{CATALOG}.reference.silver_transformation_config")
+    .filter("is_active = true")
+    .orderBy("load_order")
+    .collect()
+}
+
+def persist_silver(transformation_name, dataframe):
+    config = silver_configs.get(transformation_name)
+    if not config:
+        print(f"Skipping inactive or unconfigured transformation: {transformation_name}")
+        return False
+    (dataframe.write
+        .format("delta")
+        .mode("overwrite")
+        .saveAsTable(config["target_table"]))
+    print(f"Persisted {transformation_name} to {config['target_table']}")
+    return True
+
+def record_silver_audit():
+    audit_rows = []
+    for transformation_name, config in silver_configs.items():
+        source_count = spark.table(config["source_table"]).count()
+        target_count = spark.table(config["target_table"]).count()
+        audit_rows.append((
+            str(uuid.uuid4()), transformation_name, "FULL", datetime.datetime.now(),
+            datetime.datetime.now(), source_count, target_count, target_count,
+            target_count, target_count, 0, 0, 0, "SUCCESS", ""
+        ))
+    if audit_rows:
+        spark.createDataFrame(audit_rows, [
+            "load_id", "transformation_name", "load_type", "load_start_time",
+            "load_end_time", "source_row_count", "staging_row_count",
+            "target_row_count_before", "target_row_count_after", "rows_inserted",
+            "rows_updated", "scd2_new_versions", "scd2_closed_versions", "status",
+            "error_message"
+        ]).write.mode("append").saveAsTable(f"{CATALOG}.reference.silver_load_audit")
 
 # COMMAND ----------
 
@@ -61,10 +104,7 @@ silver_policy = (
 )
 
 # Overwrite Silver policy dimension (for initial load; use MERGE for incremental)
-(silver_policy.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.policy_dim"))
+persist_silver("policy_dim", silver_policy)
 
 print(f"✓ Silver policy_dim loaded: {silver_policy.count()} records")
 
@@ -105,10 +145,7 @@ silver_claim = (
     .drop("raw_payload", "source_system", "ingestion_timestamp")
 )
 
-(silver_claim.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.claim_dim"))
+persist_silver("claim_dim", silver_claim)
 
 print(f"✓ Silver claim_dim loaded: {silver_claim.count()} records")
 
@@ -118,7 +155,7 @@ invalid_statuses = spark.sql(f"""
     FROM {CATALOG}.{SILVER}.claim_dim
     WHERE NOT {CATALOG}.dq.check_claim_status(claim_status)
 """).collect()[0]["invalid_status_count"]
-print(f"  Invalid claim status check: {invalid_status} invalid records found")
+print(f"  Invalid claim status check: {invalid_statuses} invalid records found")
 
 # COMMAND ----------
 
@@ -154,10 +191,7 @@ silver_customer = (
     .drop("source_system", "ingestion_timestamp", "address_line1", "address_line2")
 )
 
-(silver_customer.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.customer_dim"))
+persist_silver("customer_dim", silver_customer)
 
 print(f"✓ Silver customer_dim loaded: {silver_customer.count()} records (PII masked)")
 
@@ -199,10 +233,7 @@ silver_agent = (
     .drop("agent_license_number", "source_system", "ingestion_timestamp", "termination_date")
 )
 
-(silver_agent.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.agent_dim"))
+persist_silver("agent_dim", silver_agent)
 
 print(f"✓ Silver agent_dim loaded: {silver_agent.count()} records")
 
@@ -217,7 +248,7 @@ print(f"✓ Silver agent_dim loaded: {silver_agent.count()} records")
 date_range = spark.range(0, 2557)  # ~7 years
 silver_date = (
     date_range
-    .withColumn("full_date", F.expr("date_add('2020-01-01', id)"))
+    .withColumn("full_date", F.date_add(F.to_date(F.lit("2020-01-01")), F.col("id").cast("int")))
     .withColumn("date_sk", F.date_format(F.col("full_date"), "yyyyMMdd").cast("int"))
     .withColumn("day_of_week", F.date_format(F.col("full_date"), "EEEE"))
     .withColumn("day_of_month", F.dayofmonth(F.col("full_date")))
@@ -233,10 +264,7 @@ silver_date = (
     .drop("id")
 )
 
-(silver_date.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.date_dim"))
+persist_silver("date_dim", silver_date)
 
 print(f"✓ Silver date_dim loaded: {silver_date.count()} records (2020-2026)")
 
@@ -269,10 +297,7 @@ silver_premium = (
     .drop("source_system", "ingestion_timestamp")
 )
 
-(silver_premium.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.premium_fact"))
+persist_silver("premium_fact", silver_premium)
 
 print(f"✓ Silver premium_fact loaded: {silver_premium.count()} records")
 
@@ -312,10 +337,7 @@ silver_claim_fact = (
     .drop("raw_payload", "source_system", "ingestion_timestamp", "adjuster_id", "fraud_flag", "litigation_flag")
 )
 
-(silver_claim_fact.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{SILVER}.claim_fact"))
+persist_silver("claim_fact", silver_claim_fact)
 
 print(f"✓ Silver claim_fact loaded: {silver_claim_fact.count()} records")
 
@@ -329,23 +351,16 @@ print(f"  Valid claim status check: {invalid_claims} invalid records found")
 
 # COMMAND ----------
 
+record_silver_audit()
+
 # DBTITLE 1,Silver Layer Summary
-# MAGIC %sql
-# MAGIC -- ============================================
-# MAGIC -- Silver Layer Summary
-# MAGIC -- ============================================
-# MAGIC
-# MAGIC SELECT 'policy_dim' AS table_name, COUNT(*) AS record_count FROM pc_insurance.silver.policy_dim
-# MAGIC UNION ALL
-# MAGIC SELECT 'claim_dim', COUNT(*) FROM pc_insurance.silver.claim_dim
-# MAGIC UNION ALL
-# MAGIC SELECT 'customer_dim', COUNT(*) FROM pc_insurance.silver.customer_dim
-# MAGIC UNION ALL
-# MAGIC SELECT 'agent_dim', COUNT(*) FROM pc_insurance.silver.agent_dim
-# MAGIC UNION ALL
-# MAGIC SELECT 'date_dim', COUNT(*) FROM pc_insurance.silver.date_dim
-# MAGIC UNION ALL
-# MAGIC SELECT 'premium_fact', COUNT(*) FROM pc_insurance.silver.premium_fact
-# MAGIC UNION ALL
-# MAGIC SELECT 'claim_fact', COUNT(*) FROM pc_insurance.silver.claim_fact
-# MAGIC ORDER BY table_name;
+spark.sql(f"""
+    SELECT 'policy_dim' AS table_name, COUNT(*) AS record_count FROM {CATALOG}.{SILVER}.policy_dim
+    UNION ALL SELECT 'claim_dim', COUNT(*) FROM {CATALOG}.{SILVER}.claim_dim
+    UNION ALL SELECT 'customer_dim', COUNT(*) FROM {CATALOG}.{SILVER}.customer_dim
+    UNION ALL SELECT 'agent_dim', COUNT(*) FROM {CATALOG}.{SILVER}.agent_dim
+    UNION ALL SELECT 'date_dim', COUNT(*) FROM {CATALOG}.{SILVER}.date_dim
+    UNION ALL SELECT 'premium_fact', COUNT(*) FROM {CATALOG}.{SILVER}.premium_fact
+    UNION ALL SELECT 'claim_fact', COUNT(*) FROM {CATALOG}.{SILVER}.claim_fact
+    ORDER BY table_name
+""").show()

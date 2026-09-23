@@ -22,6 +22,7 @@
 # DBTITLE 1,Configuration
 from pyspark.sql import functions as F
 import datetime
+import uuid
 
 CATALOG = "pc_insurance"
 SILVER = "silver"
@@ -29,6 +30,50 @@ GOLD = "gold"
 
 now = F.current_timestamp()
 print("Gold Pipeline started at:", datetime.datetime.now())
+
+# Gold outputs, dimensions, formulas, and refresh order are controlled by metadata.
+gold_configs = {
+    row["metric_name"]: row.asDict()
+    for row in spark.table(f"{CATALOG}.reference.gold_metric_config")
+    .filter("is_active = true")
+    .orderBy("load_order")
+    .collect()
+}
+
+def persist_gold(metric_name, dataframe):
+    config = gold_configs.get(metric_name)
+    if not config:
+        print(f"Skipping inactive or unconfigured metric: {metric_name}")
+        return False
+    (dataframe.write
+        .format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(config["output_table"]))
+    print(f"Persisted {metric_name} to {config['output_table']}")
+    return True
+
+def record_gold_audit():
+    rows = []
+    for metric_name, config in gold_configs.items():
+        source_count = 0
+        for source in (config["source_tables"] or "").split(","):
+            source = source.strip()
+            if source:
+                source_name = source if source.count(".") == 2 else f"{CATALOG}.{source}"
+                source_count += spark.table(source_name).count()
+        target_count = spark.table(config["output_table"]).count()
+        rows.append((
+            str(uuid.uuid4()), metric_name, config["output_table"],
+            datetime.datetime.now(), datetime.datetime.now(), source_count,
+            target_count, "SUCCESS", ""
+        ))
+    if rows:
+        spark.createDataFrame(rows, [
+            "load_id", "metric_name", "output_table", "load_start_time",
+            "load_end_time", "source_row_count", "target_row_count", "status",
+            "error_message"
+        ]).write.mode("append").saveAsTable(f"{CATALOG}.reference.gold_load_audit")
 
 # COMMAND ----------
 
@@ -92,16 +137,13 @@ gold_loss_ratio = (
     .withColumn("loaded_at", now)
     .select(
         "reporting_period", "period_type", "line_of_business",
-        "earned_premium", "incurred_losses", "expense_amount",
+        "earned_premium", "written_premium", "incurred_losses", "expense_amount",
         "loss_ratio", "expense_ratio", "combined_ratio",
         "policy_count", "claim_count", "loaded_at"
     )
 )
 
-(gold_loss_ratio.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{GOLD}.loss_ratio_by_lob"))
+persist_gold("loss_ratio_by_lob", gold_loss_ratio)
 
 print(f"✓ Gold loss_ratio_by_lob loaded: {gold_loss_ratio.count()} records")
 gold_loss_ratio.orderBy(F.desc("reporting_period")).show(10, truncate=False)
@@ -168,10 +210,7 @@ gold_freq_severity = (
     )
 )
 
-(gold_freq_severity.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{GOLD}.claim_frequency_severity"))
+persist_gold("claim_frequency_severity", gold_freq_severity)
 
 print(f"✓ Gold claim_frequency_severity loaded: {gold_freq_severity.count()} records")
 
@@ -184,13 +223,14 @@ print(f"✓ Gold claim_frequency_severity loaded: {gold_freq_severity.count()} r
 
 policy_dim = spark.table(f"{CATALOG}.{SILVER}.policy_dim")
 agent_dim = spark.table(f"{CATALOG}.{SILVER}.agent_dim")
+date_dim_for_policy = spark.table(f"{CATALOG}.{SILVER}.date_dim")
 
 # Classify policies by status
 retention_data = (
     policy_dim
     .join(agent_dim, on="agent_id", how="left")
-    .join(spark.table(f"{CATALOG}.{SILVER}.date_dim"), 
-          policy_dim["effective_date"] == spark.table(f"{CATALOG}.{SILVER}.date_dim")["full_date"], how="left")
+        .join(date_dim_for_policy,
+            policy_dim["effective_date"] == date_dim_for_policy["full_date"], how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.lit("Quarterly").alias("period_type"),
@@ -222,10 +262,7 @@ retention_data = (
     )
 )
 
-(retention_data.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{GOLD}.retention_by_agent"))
+persist_gold("retention_by_agent", retention_data)
 
 print(f"✓ Gold retention_by_agent loaded: {retention_data.count()} records")
 
@@ -275,10 +312,7 @@ cols += ["total_written_premium", "total_earned_premium", "growth_rate", "loaded
 
 gold_premium_growth = gold_premium_growth.select(*cols)
 
-(gold_premium_growth.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{GOLD}.premium_growth"))
+persist_gold("premium_growth", gold_premium_growth)
 
 print(f"✓ Gold premium_growth loaded: {gold_premium_growth.count()} records")
 
@@ -291,8 +325,8 @@ print(f"✓ Gold premium_growth loaded: {gold_premium_growth.count()} records")
 
 gold_exposure = (
     policy_dim
-    .join(spark.table(f"{CATALOG}.{SILVER}.date_dim"),
-          policy_dim["effective_date"] == spark.table(f"{CATALOG}.{SILVER}.date_dim")["full_date"], how="left")
+    .join(date_dim_for_policy,
+          policy_dim["effective_date"] == date_dim_for_policy["full_date"], how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.lit("Quarterly").alias("period_type"),
@@ -310,10 +344,7 @@ gold_exposure = (
     .withColumn("loaded_at", now)
 )
 
-(gold_exposure.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{GOLD}.exposure_summary"))
+persist_gold("exposure_summary", gold_exposure)
 
 print(f"✓ Gold exposure_summary loaded: {gold_exposure.count()} records")
 
@@ -361,31 +392,22 @@ gold_uw_summary = (
     )
 )
 
-(gold_uw_summary.write
-    .format("delta")
-    .mode("overwrite")
-    .saveAsTable(f"{CATALOG}.{GOLD}.uw_dashboard_summary"))
+persist_gold("uw_dashboard_summary", gold_uw_summary)
 
 print(f"✓ Gold uw_dashboard_summary loaded: {gold_uw_summary.count()} records")
 gold_uw_summary.orderBy(F.desc("reporting_period")).show(10, truncate=False)
 
 # COMMAND ----------
 
+record_gold_audit()
+
 # DBTITLE 1,Gold Layer Summary
-# MAGIC %sql
-# MAGIC -- ============================================
-# MAGIC -- Gold Layer Summary
-# MAGIC -- ============================================
-# MAGIC
-# MAGIC SELECT 'loss_ratio_by_lob' AS table_name, COUNT(*) AS record_count FROM pc_insurance.gold.loss_ratio_by_lob
-# MAGIC UNION ALL
-# MAGIC SELECT 'claim_frequency_severity', COUNT(*) FROM pc_insurance.gold.claim_frequency_severity
-# MAGIC UNION ALL
-# MAGIC SELECT 'retention_by_agent', COUNT(*) FROM pc_insurance.gold.retention_by_agent
-# MAGIC UNION ALL
-# MAGIC SELECT 'premium_growth', COUNT(*) FROM pc_insurance.gold.premium_growth
-# MAGIC UNION ALL
-# MAGIC SELECT 'exposure_summary', COUNT(*) FROM pc_insurance.gold.exposure_summary
-# MAGIC UNION ALL
-# MAGIC SELECT 'uw_dashboard_summary', COUNT(*) FROM pc_insurance.gold.uw_dashboard_summary
-# MAGIC ORDER BY table_name;
+spark.sql(f"""
+    SELECT 'loss_ratio_by_lob' AS table_name, COUNT(*) AS record_count FROM {CATALOG}.{GOLD}.loss_ratio_by_lob
+    UNION ALL SELECT 'claim_frequency_severity', COUNT(*) FROM {CATALOG}.{GOLD}.claim_frequency_severity
+    UNION ALL SELECT 'retention_by_agent', COUNT(*) FROM {CATALOG}.{GOLD}.retention_by_agent
+    UNION ALL SELECT 'premium_growth', COUNT(*) FROM {CATALOG}.{GOLD}.premium_growth
+    UNION ALL SELECT 'exposure_summary', COUNT(*) FROM {CATALOG}.{GOLD}.exposure_summary
+    UNION ALL SELECT 'uw_dashboard_summary', COUNT(*) FROM {CATALOG}.{GOLD}.uw_dashboard_summary
+    ORDER BY table_name
+""").show()
