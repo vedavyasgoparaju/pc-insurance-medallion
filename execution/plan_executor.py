@@ -15,6 +15,7 @@ from databricks.sdk import WorkspaceClient
 DEFAULT_ROOTS = (
     "/Users/vedavyas.goparaju@gmail.com/InsuranceModel",
     "/Users/vedavyas.goparaju@gmail.com/Supervisor_Agent_Setup",
+    "/Repos/vedavyas.goparaju/pc-insurance-medallion",
 )
 
 

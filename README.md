@@ -261,7 +261,8 @@ databricks bundle deploy -t staging \
   --var sql_warehouse_id=<staging-warehouse-id> \
   --var supervisor_endpoint=<staging-supervisor-endpoint> \
   --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel
+  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
+  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
 ```
 
 Use the same command with `-t prod` and production values for production. Hosts

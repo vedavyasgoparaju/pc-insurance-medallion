@@ -1,3 +1,4 @@
+
 # P&C Insurance Medallion Architecture
 ## End-to-End Architecture, Agents, Operations, and Deployment Guide
 
@@ -209,6 +210,11 @@ The Supervisor is the team lead and router. It:
 
 The Supervisor should not directly hold broad workspace-admin privileges. Runtime mutations are performed by the execution Job identity.
 
+For mutating requests, the Supervisor's completion policy requires Documentation
+to update affected documents, QA to validate the change, and DevOps to prepare a
+final Git commit. The execution plan is not considered complete until those
+steps are represented and validation succeeds.
+
 ### 4.2 Specialist agents
 
 | Agent | Tool type | Responsibilities |
@@ -353,7 +359,8 @@ databricks bundle deploy -t staging \
   --var sql_warehouse_id=<staging-warehouse-id> \
   --var supervisor_endpoint=<staging-supervisor-endpoint> \
   --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel
+        --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
+        --var repo_path=/Repos/<target-user>/pc-insurance-medallion
 ```
 
 For production:
@@ -363,7 +370,8 @@ databricks bundle deploy -t prod \
   --var sql_warehouse_id=<prod-warehouse-id> \
   --var supervisor_endpoint=<prod-supervisor-endpoint> \
   --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel
+        --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
+        --var repo_path=/Repos/<target-user>/pc-insurance-medallion
 ```
 
 Workspace hosts are supplied by the `staging` and `prod` Databricks CLI profiles. Credentials are not stored in Git.

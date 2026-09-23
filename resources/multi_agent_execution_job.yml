@@ -45,6 +45,10 @@ resources:
           default: ${var.sql_warehouse_id}
         - name: workspace_root
           default: ${var.workspace_root}
+        - name: repo_path
+          default: ${var.repo_path}
+        - name: allowed_roots
+          default: ${var.allowed_roots}
       tasks:
         - task_key: orchestrate_request
           spark_python_task:
@@ -60,6 +64,10 @@ resources:
               - "{{job.parameters.warehouse_id}}"
               - --workspace-root
               - "{{job.parameters.workspace_root}}"
+              - --repo-path
+              - "{{job.parameters.repo_path}}"
+              - --allowed-roots
+              - "{{job.parameters.allowed_roots}}"
           environment_key: serverless
       environments:
         - environment_key: serverless

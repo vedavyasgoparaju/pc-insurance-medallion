@@ -16,7 +16,9 @@ variables:
   workspace_root:
     default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel
   allowed_roots:
-    default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel,/Users/vedavyas.goparaju@gmail.com/Supervisor_Agent_Setup
+    default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel,/Users/vedavyas.goparaju@gmail.com/Supervisor_Agent_Setup,/Repos/vedavyas.goparaju/pc-insurance-medallion
+  repo_path:
+    default: /Repos/vedavyas.goparaju/pc-insurance-medallion
 
 targets:
   dev:

@@ -15,6 +15,7 @@ from plan_executor import _single_statement, _workspace_path
 SUPERVISOR_ENDPOINT = os.getenv("SUPERVISOR_ENDPOINT", "mas-0bcacd94-endpoint")
 WAREHOUSE_ID = os.getenv("SQL_WAREHOUSE_ID", "670b9d31fd290bb2")
 WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "/Users/vedavyas.goparaju@gmail.com/InsuranceModel")
+REPO_PATH = os.getenv("REPO_PATH", "/Repos/vedavyas.goparaju/pc-insurance-medallion")
 REQUEST_TABLE = "pc_insurance.reference.agent_requests"
 
 
@@ -61,8 +62,12 @@ def _request_plan(client: WorkspaceClient, request: str) -> dict[str, Any]:
     prompt = f"""Convert this request into an execution plan for the P&C Insurance Medallion project.
 Return ONLY valid JSON with this shape: {{\"version\":1,\"request_id\":\"...\",\"operations\":[...]}}.
 Allowed operation types are write_workspace_file, execute_sql, run_notebook, and git_commit.
-Use only paths below {WORKSPACE_ROOT}.
-Do not call tools. Do not return Markdown or explanations.
+Use workspace paths below {WORKSPACE_ROOT} and use this Databricks Repo for commits: {REPO_PATH}.
+For any request that changes code, schemas, pipelines, configuration, or documentation, always include these final steps in the plan:
+1. Ask the Documentation specialist to update the affected README, runbook, or architecture documentation and include those file writes.
+2. Ask the QA specialist to define and run relevant validation before committing.
+3. Ask the DevOps specialist to prepare a descriptive Git commit operation as the final operation, using repo_path {REPO_PATH}.
+Do not include a Git commit for read-only questions or failed validation. Do not call tools. Do not return Markdown or explanations.
 User request: {request}"""
     response = client._api_client.do(
         "POST",
@@ -140,18 +145,23 @@ def _wait_for_run(client: WorkspaceClient, run_id: int) -> dict[str, Any]:
 
 
 def main() -> None:
-    global SUPERVISOR_ENDPOINT, WAREHOUSE_ID, WORKSPACE_ROOT
+    global SUPERVISOR_ENDPOINT, WAREHOUSE_ID, WORKSPACE_ROOT, REPO_PATH
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", default="")
     parser.add_argument("--execution-job-id", type=int, required=True)
     parser.add_argument("--supervisor-endpoint", default=SUPERVISOR_ENDPOINT)
     parser.add_argument("--warehouse-id", default=WAREHOUSE_ID)
     parser.add_argument("--workspace-root", default=WORKSPACE_ROOT)
+    parser.add_argument("--repo-path", default=REPO_PATH)
+    parser.add_argument("--allowed-roots", default=os.getenv("EXECUTION_ALLOWED_ROOTS", ""))
     args = parser.parse_args()
 
     SUPERVISOR_ENDPOINT = args.supervisor_endpoint
     WAREHOUSE_ID = args.warehouse_id
     WORKSPACE_ROOT = args.workspace_root
+    REPO_PATH = args.repo_path
+    if args.allowed_roots:
+        os.environ["EXECUTION_ALLOWED_ROOTS"] = args.allowed_roots
 
     client = WorkspaceClient()
     if args.request.strip():
