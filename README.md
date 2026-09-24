@@ -13,6 +13,16 @@ Both Bronze and Silver layers now use a **metadata-driven approach** with:
 - **SCD2, FACT, and DEDUP transformation types** with PII masking (Silver)
 - **Both INITIAL and INCREMENTAL load** patterns supported
 
+## Recent Changes (2026-09-24)
+
+### Repository Cleanup
+- ❌ **Removed:** `Silver_Pipeline.py` (obsolete hardcoded transformations)
+- ✅ **Active:** `Silver_Pipeline_Metadata.py` (metadata-driven framework)
+- 📝 **Updated:** `Orchestrator.py` now uses metadata-driven Silver pipeline
+- 📄 **Added:** `CLEANUP_SUMMARY.md` and `CLEANUP_FINAL_REPORT.txt`
+
+**Reason:** Ensures full compliance with the Metadata-Driven Silver and Gold Mandate. All Silver transformations are now config-driven via `silver_transformation_config`.
+
 ## Architecture
 
 ### Unity Catalog Structure
@@ -224,16 +234,23 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
 
 ## Notebooks
 
+### Active Pipelines
 - `Bronze_Pipeline` - Metadata-driven Auto Loader ingestion (INITIAL + INCREMENTAL)
-- `Silver_Pipeline` - Original Silver pipeline (hardcoded transformations)
-- `Silver_Pipeline_Metadata` - Metadata-driven Silver pipeline (config-driven SCD2/FACT/DEDUP)
+- `Silver_Pipeline_Metadata` - ⭐ **ACTIVE** Metadata-driven Silver pipeline (config-driven SCD2/FACT/DEDUP)
 - `Gold_Pipeline` - KPI aggregations
+- `Orchestrator` - Master pipeline orchestrator (updated to use metadata-driven Silver)
+
+### Agent Setup
 - `Architect_Agent` - MLflow agent for architecture design
 - `Data_Engineer_Agent` - MLflow agent for pipeline code
 - `Domain_Expert_Setup` - UC volume with P&C reference docs
 - `Analyst_Genie_Setup` - Genie Space over Gold tables
 - `Supervisor_Agent_Setup` - Multi-agent orchestration
-- `Orchestrator` - Top-level walkthrough and demo script
+
+### Documentation
+- `README.md` - This file
+- `CLEANUP_SUMMARY.md` - Recent cleanup documentation
+- `CLEANUP_FINAL_REPORT.txt` - Detailed cleanup report
 
 ## SQL DDL
 
@@ -253,3 +270,14 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
 
 - **GitHub**: https://github.com/vedavyasgoparaju/pc-insurance-medallion
 - **Databricks Git Folder**: /Repos/vedavyas.goparaju/pc-insurance-medallion
+
+## Getting Started
+
+1. **Setup Unity Catalog**: Run `sql/01_catalog_schemas.sql`
+2. **Create Bronze Tables**: Run `sql/02_bronze_tables.sql`
+3. **Create Gold Tables**: Run `sql/04_gold_tables.sql`
+4. **Run Bronze Pipeline**: Execute `Bronze_Pipeline` with `load_type=INITIAL`
+5. **Run Silver Pipeline**: Execute `Silver_Pipeline_Metadata` with `load_type=INITIAL`
+6. **Run Gold Pipeline**: Execute `Gold_Pipeline`
+7. **Setup Agents**: Run agent setup notebooks
+8. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly

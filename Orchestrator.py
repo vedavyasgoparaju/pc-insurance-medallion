@@ -13,7 +13,7 @@
 # MAGIC
 # MAGIC ```
 # MAGIC 1. Bronze_Pipeline     → Ingest raw P&C data
-# MAGIC 2. Silver_Pipeline     → Transform to conformed dimensions & facts
+# MAGIC 2. Silver_Pipeline_Metadata → Transform to conformed dimensions & facts
 # MAGIC 3. Gold_Pipeline       → Build KPI aggregations
 # MAGIC 4. Architect_Agent     → Deploy Architect AI agent endpoint
 # MAGIC 5. Data_Engineer_Agent → Deploy Data Engineer AI agent endpoint
@@ -114,7 +114,7 @@ silver_counts.show()
 
 if silver_counts.filter(F.col("cnt") > 0).count() == 0:
     print("⚠ Silver tables are empty. Running Silver_Pipeline inline...")
-    dbutils.notebook.run("/Users/vedavyas.goparaju@gmail.com/Silver_Pipeline", 600)
+    dbutils.notebook.run("/Users/vedavyas.goparaju@gmail.com/Silver_Pipeline_Metadata", 600)
 else:
     print("✓ Silver layer has data")
 
