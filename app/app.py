@@ -248,7 +248,7 @@ def git_commit(commit_message: str, repo_path: str = GIT_REPO_PATH) -> str:
 
     Returns:
         JSON string with commit status.
-    ""
+    """
     try:
         # Convert Databricks repo path to filesystem path
         repo_fs_path = f"/Workspace{repo_path}"
