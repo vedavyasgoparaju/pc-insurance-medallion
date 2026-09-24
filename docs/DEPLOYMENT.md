@@ -33,14 +33,143 @@ For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md). For ongoing op
 - Databricks Runtime 13.3 LTS or higher
 
 ### Permissions Required
-- Workspace Admin (for initial setup)
-- Unity Catalog Admin (for catalog/schema creation)
-- Cluster creation permissions
-- Git repository access
+
+A Genie or engineer deploying this project needs the following permissions. Missing ANY of these will block specific phases.
+
+#### 1. Workspace-Level Permissions
+
+| Permission | Why Needed | Phase |
+|---|---|---|
+| **Workspace Admin** | Create Git folders, secret scopes, apps, Genie spaces | All phases |
+| **Serverless compute enabled** | Run pipeline notebooks and agent setup notebooks | Phases 1-5 |
+| **Model Serving enabled** | Create serving endpoints for Architect and Data Engineer agents | Phase 5, Step 4 |
+| **Databricks Apps enabled** | Deploy the MCP app (`pc-insurance-workspace-actions`) | Phase 5, Step 5 |
+| **Genie Spaces enabled** | Create Analyst, Documentation, and DevOps Genie spaces | Phase 5, Step 3 |
+| **Agent Bricks enabled** | Create Knowledge Assistant and Supervisor Agent | Phase 5, Steps 2 & 6 |
+| **MLflow access** | Log and register agent models | Phase 5, Step 4 |
+
+> **Check**: Go to **Admin Settings** → **Workspace Settings** and verify: Serverless Compute = Enabled, Model Serving = Enabled, Databricks Apps = Enabled. Contact your workspace admin if any are disabled.
+
+#### 2. Unity Catalog Permissions
+
+The deployer needs `CATALOG_OWNER` or equivalent to create the catalog, schemas, tables, functions, and volumes. If the catalog already exists, the deployer needs at minimum:
+
+```sql
+-- Catalog-level
+GRANT USE CATALOG ON CATALOG pc_insurance TO `principal-or-group`;
+GRANT CREATE SCHEMA ON CATALOG pc_insurance TO `principal-or-group`;
+
+-- Schema-level (run for EACH schema: bronze, silver, gold, reference, dq)
+GRANT USE SCHEMA ON SCHEMA pc_insurance.bronze TO `principal-or-group`;
+GRANT CREATE TABLE ON SCHEMA pc_insurance.bronze TO `principal-or-group`;
+GRANT CREATE FUNCTION ON SCHEMA pc_insurance.dq TO `principal-or-group`;
+GRANT CREATE VOLUME ON SCHEMA pc_insurance.reference TO `principal-or-group`;
+
+-- Table-level (after tables are created — run for all tables in all schemas)
+GRANT SELECT, MODIFY ON ALL TABLES IN SCHEMA pc_insurance.bronze TO `principal-or-group`;
+GRANT SELECT, MODIFY ON ALL TABLES IN SCHEMA pc_insurance.silver TO `principal-or-group`;
+GRANT SELECT, MODIFY ON ALL TABLES IN SCHEMA pc_insurance.gold TO `principal-or-group`;
+GRANT SELECT, MODIFY ON ALL TABLES IN SCHEMA pc_insurance.reference TO `principal-or-group`;
+
+-- Volume-level (for domain documents)
+GRANT READ VOLUME, WRITE VOLUME ON VOLUME pc_insurance.reference.pc_domain_docs TO `principal-or-group`;
+
+-- Function-level (after DQ functions are created — Phase 5, Step 1)
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pc_insurance.dq TO `principal-or-group`;
+```
+
+> **Replace** `principal-or-group` with the actual service principal name, group, or user email. If using a service principal for the MCP app, grant these to the app's service principal as well.
+
+#### 3. MLflow Model Registry Permissions
+
+| Permission | Why Needed |
+|---|---|
+| Create MLflow experiment | Log Architect and Data Engineer agent models |
+| Register models in UC Model Registry | Register `pc_architect_agent`, `pc_data_engineer_agent` |
+| Create serving endpoints | Deploy models as serving endpoints |
+| `CAN_MANAGE` on serving endpoints | Configure and update endpoints |
+
+> **Check**: Go to **Models** in the sidebar. If you can create a new registered model, you have sufficient permissions.
+
+#### 4. Git Credentials Setup
+
+The MCP app and pipeline notebooks use Git for version control. Set up Git credentials BEFORE cloning the repo:
+
+**Via Databricks UI:**
+1. Go to **Workspace** → **Repos** → **Add Repo**
+2. If prompted, configure Git credentials:
+   - **Git provider**: GitHub
+   - **GitHub username**: `vedavyasgoparaju` (or your username)
+   - **Token/Password**: GitHub Personal Access Token (PAT) with `repo` scope
+   - Save credentials
+3. Enter Git URL: `https://github.com/vedavyasgoparaju/pc-insurance-medallion.git`
+4. Select branch: `main`
+5. Click **Create Repo**
+
+**Via Databricks CLI:**
+```bash
+# Configure Git credentials
+databricks git-credentials add \
+  --git-provider github \
+  --git-username vedavyasgoparaju \
+  --git-password <your-github-pat-token>
+```
+
+**Create Secret Scope for GitHub Token (for MCP app):**
+```bash
+# Create secret scope
+databricks secrets create-scope pc_insurance
+
+# Store GitHub PAT token
+databricks secrets put-secret pc_insurance github_token --string-value <your-github-pat-token>
+```
+
+> The MCP app uses this secret scope to authenticate Git push operations. The scope name `pc_insurance` and key `github_token` must match.
+
+#### 5. SQL Warehouse Access
+
+The MCP app requires a SQL warehouse for statement execution:
+
+| Requirement | Details |
+|---|---|
+| SQL warehouse (Serverless or Pro) | Needed for MCP app's `execute_sql` and `run_dq_checks` tools |
+| `CAN_USE` permission on the warehouse | Required for the MCP app's service principal |
+| Warehouse ID | Set as `SQL_WAREHOUSE_ID` env var in the MCP app (or leave empty for auto-detect) |
+
+> **Check**: Go to **SQL Warehouses** in the sidebar. Ensure at least one warehouse exists and is running. Note its ID from the warehouse details page.
+
+#### 6. Databricks CLI Authentication
+
+The deployer needs the Databricks CLI configured with authentication for bundle deployment:
+
+```bash
+# Configure CLI with workspace URL and token
+databricks configure --host https://<your-workspace>.cloud.databricks.com \
+  --token <your-workspace-access-token>
+
+# Verify configuration
+databricks workspace ls /
+```
+
+Or use OAuth:
+```bash
+databricks auth login --host https://<your-workspace>.cloud.databricks.com
+```
+
+#### 7. Service Principal for MCP App
+
+The MCP app (`pc-insurance-workspace-actions`) runs as a service principal and needs:
+- Unity Catalog permissions (see Section 2 above)
+- SQL warehouse access (see Section 5 above)
+- Git repository access (the app clones and pushes to the repo)
+- Workspace file permissions (read/write notebooks and files)
+
+> **Important**: The MCP app's service principal must have the same UC grants as the deployer. Apply ALL GRANT statements from Section 2 to the app's service principal as well.
 
 ### Tools
-- **Databricks CLI** installed locally (for CI/CD)
+- **Databricks CLI** installed locally (v0.230+ recommended) — for CI/CD, bundle deployment, app deployment, and secret management
 - **GitHub account** with access to the project repo
+- **GitHub Personal Access Token** (PAT) with `repo` scope — for Git credentials and secret scope
 
 **GitHub Repo**: https://github.com/vedavyasgoparaju/pc-insurance-medallion
 
@@ -111,10 +240,15 @@ CREATE SCHEMA IF NOT EXISTS pc_insurance.dq;
 -- Create volume for P&C domain documents
 CREATE VOLUME IF NOT EXISTS pc_insurance.reference.pc_domain_docs;
 
--- Grant permissions (replace with your service principal)
-GRANT USE CATALOG ON CATALOG pc_insurance TO `your-service-principal`;
-GRANT CREATE TABLE ON SCHEMA pc_insurance.bronze TO `your-service-principal`;
--- Repeat for all schemas
+-- Grant permissions — see the "Permissions Required" section in Prerequisites above for the COMPLETE set of GRANT statements
+-- (catalog-level, all 5 schemas, tables, volumes, functions, and service principal grants)
+-- At minimum for this step:
+GRANT USE CATALOG ON CATALOG pc_insurance TO `principal-or-group`;
+GRANT USE SCHEMA ON SCHEMA pc_insurance.bronze TO `principal-or-group`;
+GRANT USE SCHEMA ON SCHEMA pc_insurance.silver TO `principal-or-group`;
+GRANT USE SCHEMA ON SCHEMA pc_insurance.gold TO `principal-or-group`;
+GRANT USE SCHEMA ON SCHEMA pc_insurance.reference TO `principal-or-group`;
+GRANT USE SCHEMA ON SCHEMA pc_insurance.dq TO `principal-or-group`;
 
 -- Verify
 SHOW SCHEMAS IN pc_insurance;
