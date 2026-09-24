@@ -452,17 +452,29 @@ Job 2 (`PC_Insurance_Data_Pipeline`) runs 3 tasks sequentially:
 
 **Initial load** (first time):
 ```bash
-# Run with INITIAL load type
-databricks jobs run-now 894776717783668 --notebook-params '{"load_type":"INITIAL"}'
+# Run with INITIAL load type (using job_parameters, not notebook_params)
+databricks jobs run-now 894776717783668 --json '{"job_parameters":{"load_type":"INITIAL"}}'
+```
+
+Or via Python SDK:
+```python
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+w.jobs.run_now(job_id=894776717783668, job_parameters={"load_type": "INITIAL"})
 ```
 
 **Incremental load** (scheduled or on-demand):
 ```bash
-# Run with INCREMENTAL load type (default)
+# Run with INCREMENTAL load type (default -- no parameters needed)
+databricks jobs run-now 894776717783668 --json '{"job_parameters":{"load_type":"INCREMENTAL"}}'
+
+# Or simply (uses default parameter)
 databricks jobs run-now 894776717783668
 ```
 
 **Via Supervisor Agent** (on-demand): Ask the Supervisor Agent to run the pipeline. The Supervisor Agent uses the MCP app's `run_notebook` tool to trigger Bronze, then Silver, then Gold sequentially.
+
+**Parameter passing**: The notebook tasks use `{{job.parameters.load_type}}` in their `baseParameters` to receive the job-level `load_type` parameter. When triggered with `job_parameters={"load_type": "INITIAL"}`, all notebooks receive `INITIAL`. When triggered without parameters, they default to `INCREMENTAL`.
 
 **Schedule** (optional): Set a cron schedule on Job 2 for automated incremental loads (e.g., daily at 2:00 AM UTC).
 
@@ -1267,7 +1279,7 @@ Use the same command with `-t prod` and production values for production.
 
 ### Pipeline Rollback
 1. Identify the last known good state via audit tables
-2. Re-run the pipeline with `load_type=INITIAL` to reload from source
+2. Re-run the pipeline job with `job_parameters={"load_type":"INITIAL"}` to reload from source
 3. Verify row counts and DQ scores match previous good state
 
 ### Git Rollback

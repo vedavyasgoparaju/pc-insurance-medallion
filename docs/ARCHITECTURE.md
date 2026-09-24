@@ -389,6 +389,8 @@ The project uses 2 jobs with distinct purposes:
 
 **Load Types**: `INITIAL` (first-time full load) or `INCREMENTAL` (default, for scheduled runs)
 
+**Parameter Passing**: Notebook tasks reference `{{job.parameters.load_type}}` in their `baseParameters`. Trigger with `job_parameters={"load_type": "INITIAL"}` for initial loads, or omit for the default `INCREMENTAL`.
+
 ### On-Demand Execution via Supervisor Agent
 
 The Supervisor Agent can trigger pipeline notebooks on-demand through the MCP app's `run_notebook` tool. No separate orchestrator job is needed -- the Supervisor Agent + MCP app provide direct workspace execution capabilities.

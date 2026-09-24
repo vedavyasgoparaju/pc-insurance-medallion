@@ -165,9 +165,12 @@ pc-insurance-medallion/
 2. **Create Bronze Tables**: Run `sql/02_bronze_tables.sql`
 3. **Configure Silver Transformations**: Run `sql/03_silver_transformation_config.sql`
 4. **Create Gold Tables**: Run `sql/04_gold_tables.sql` and `sql/05_gold_metric_config.sql`
-5. **Run Bronze Pipeline**: Execute `pipelines/Bronze_Pipeline.py` with `load_type=INITIAL`
-6. **Run Silver Pipeline**: Execute `pipelines/Silver_Pipeline_Metadata.py` with `load_type=INITIAL`
-7. **Run Gold Pipeline**: Execute `pipelines/Gold_Pipeline.py`
+5. **Run Data Pipeline Job** (initial load):
+   ```bash
+   databricks jobs run-now 894776717783668 --json '{"job_parameters":{"load_type":"INITIAL"}}'
+   ```
+   Or run notebooks individually: Bronze (`load_type=INITIAL`) -> Silver (`load_type=INITIAL`) -> Gold
+6. **For incremental loads** (default): `databricks jobs run-now 894776717783668`
 8. **Setup Agents**: Run agent setup notebooks in `agents/`
 9. **Deploy MCP App**: Deploy `app/` as `pc-insurance-workspace-actions`
 10. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
