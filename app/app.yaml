@@ -1,0 +1,13 @@
+# Databricks app configuration
+# MCP server for P&C Insurance workspace operations
+# Exposes tools the Supervisor Agent can call to apply changes to the workspace
+
+# Environment variables (set in app settings):
+#   SQL_WAREHOUSE_ID  - SQL warehouse ID for statement execution
+#   CATALOG_NAME       - Default catalog name (default: pc_insurance)
+#   GIT_REPO_PATH      - Databricks Git folder path (default: /Repos/vedavyas.goparaju/pc-insurance-medallion)
+
+# Run the MCP server using Python
+command:
+  - python
+  - app.py
