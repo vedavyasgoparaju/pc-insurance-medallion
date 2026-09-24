@@ -1,6 +1,6 @@
 # P&C Insurance Medallion Architecture on Databricks
 
-A multi-layered data platform for Property & Casualty Insurance built on Databricks, featuring Bronze/Silver/Gold pipelines, data quality functions, and a 7-agent multi-agent system.
+A multi-layered data platform for Property & Casualty Insurance built on Databricks, featuring Bronze/Silver/Gold pipelines, data quality functions, and a multi-agent system with 8 AI tools (7 subagents + 1 MCP server).
 
 ## What's New: Metadata-Driven Bronze, Silver + Gold Layers
 
@@ -12,19 +12,20 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Auto Loader** for scalable CSV ingestion from UC Volume (Bronze)
 - **SCD2, FACT, and DEDUP transformation types** with PII masking (Silver)
 - **Gold metric configuration** defining KPI sources, dimensions, formulas, grain, and refresh order
-- **Gold load audit** tracking every configured KPI refresh
 - **Both INITIAL and INCREMENTAL load** patterns supported
 
 ## Recent Changes (2026-09-25)
 
 ### Repository Restructuring
-- 📁 **New folder hierarchy**: `pipelines/`, `agents/`, `app/`, `execution/`, `utils/`, `sql/`, `docs/`
-- ❌ **Removed:** `Silver_Pipeline.py` (obsolete), `Git_Automation.py` (replaced by MCP app), `CLEANUP_SUMMARY.md`, `CLEANUP_FINAL_REPORT.txt`, `tools/`, `resources/`, `.vscode/`
-- ✅ **Active:** `Silver_Pipeline_Metadata.py` (metadata-driven framework)
-- 📝 **Updated:** All pipeline notebooks moved to `pipelines/`, agent scripts to `agents/`
-- 🔧 **MCP App:** `app/app.py` — `pc-insurance-workspace-actions` handles git commits, file writes, and SQL execution via subprocess git CLI
+- **New folder hierarchy**: `pipelines/`, `agents/`, `app/`, `execution/`, `utils/`, `sql/`, `docs/`
+- **Removed:** `Silver_Pipeline.py` (obsolete), `Git_Automation.py` (replaced by MCP app), `CLEANUP_SUMMARY.md`, `CLEANUP_FINAL_REPORT.txt`, `tools/`, `resources/`, `.vscode/`, `InsuranceModel_Architecture_Guide.pdf`
+- **Active:** `Silver_Pipeline_Metadata.py` (metadata-driven framework)
+- **MCP App:** `app/app.py` — `pc-insurance-workspace-actions` handles git commits, file writes, and SQL execution via subprocess git CLI
 
-**Reason:** Production-ready codebase with clean folder structure. All Silver transformations are config-driven via `silver_transformation_config`.
+### Documentation Consolidation (2026-09-25)
+- Merged `ARCHITECTURE.md` + `InsuranceModel_Architecture_Guide.md` → single `docs/ARCHITECTURE.md`
+- Merged `Getting_Started.md` + `Git_Automation_Guide.md` + `DEPLOYMENT.md` → single `docs/DEPLOYMENT.md`
+- Deleted 3 redundant files; docs reduced from 7 to 4 files
 
 ## Architecture
 
@@ -32,41 +33,7 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Catalog**: `pc_insurance`
 - **Schemas**: `bronze`, `silver`, `gold`, `reference`, `dq`
 
-### Metadata and Audit Tables (reference schema)
-
-| Table | Layer | Description |
-|-------|-------|-------------|
-| bronze_ingestion_config | Bronze | Config-driven source definitions (path, schema, target, load order) |
-| bronze_load_audit | Bronze | Every load execution tracked (load_id, timing, counts, status) |
-| bronze_reconciliation | Bronze | Source-to-target row count validation (MATCH/MISMATCH) |
-| silver_transformation_config | Silver | Config-driven transformation definitions (source, target, SCD2 cols, PII rules, load order) |
-| silver_load_audit | Silver | Every Silver load tracked (SCD2 ops, row counts, status) |
-| silver_reconciliation | Silver | Bronze-to-Silver row count validation (MATCH/MISMATCH) |
-| gold_metric_config | Gold | Config-driven KPI definitions, formulas, sources, and refresh order |
-| gold_load_audit | Gold | Every Gold metric refresh tracked with source and target counts |
-
-### Staging Tables (bronze schema)
-
-| Table | Description |
-|-------|-------------|
-| stg_policies | Intermediate landing zone for policies (with _load_id, _file_name) |
-| stg_claims | Intermediate landing zone for claims |
-| stg_premiums | Intermediate landing zone for premiums |
-| stg_customers | Intermediate landing zone for customers |
-| stg_agents | Intermediate landing zone for agents |
-
-### Staging Tables (silver schema)
-
-| Table | Description |
-|-------|-------------|
-| stg_policy_dim | Policy dimension staging (SCD2, with _load_id, _bronze_source) |
-| stg_claim_dim | Claim dimension staging (SCD2) |
-| stg_customer_dim | Customer dimension staging (SCD2 + PII masking applied) |
-| stg_agent_dim | Agent dimension staging (DEDUP) |
-| stg_premium_fact | Premium fact staging |
-| stg_claim_fact | Claim fact staging |
-
-### Bronze Layer (Raw Ingestion via Auto Loader)
+### Bronze Layer (Raw Ingestion)
 
 | Table | Rows | Source System |
 |-------|------|---------------|
@@ -104,129 +71,7 @@ All Bronze tables have `source_system` and `ingestion_timestamp` metadata column
 Gold outputs are selected from active rows in `gold_metric_config`; the pipeline
 does not create a new hardcoded output path for each metric.
 
-## Bronze Pipeline: Metadata-Driven Flow
-
-```
-Source CSV (UC Volume) -> Auto Loader -> Staging Table (with _load_id, _file_name)
-                                              -> Promotion -> Bronze Target Table
-                                                    |                |
-                                              Config Table    Audit + Reconciliation
-```
-
-### Load Types
-
-| Type | Behavior |
-|------|----------|
-| INITIAL | Truncate target + staging, load all files, full refresh |
-| INCREMENTAL | Preserve target, load new files only, append to target |
-
-### Running the Bronze Pipeline
-
-The `Bronze_Pipeline` notebook accepts two widget parameters:
-
-- `load_type`: `INITIAL` or `INCREMENTAL` (default: `INCREMENTAL`)
-- `source_filter`: comma-separated source names (empty = all sources)
-
-```python
-# Full refresh for all sources
-dbutils.notebook.run("Bronze_Pipeline", 600,
-  {"load_type": "INITIAL", "source_filter": ""})
-
-# Incremental load for policies only
-dbutils.notebook.run("Bronze_Pipeline", 600,
-  {"load_type": "INCREMENTAL", "source_filter": "policies"})
-```
-
-### Adding a New Bronze Source
-
-1. Add CSV files to `/Volumes/pc_insurance/reference/raw_sources/{new_source}/`
-2. Create staging + target Bronze tables
-3. Insert a row into `bronze_ingestion_config`
-4. Run the pipeline with `source_filter="{new_source}"`
-
-## Silver Pipeline: Metadata-Driven Flow
-
-```
-silver_transformation_config (defines mappings)
-    |
-    v
-Bronze Tables (policies_raw, claims_raw, etc.)
-    | cleansing, dedup, PII masking
-    v
-Silver Staging (stg_policy_dim, etc.) + _load_id, _bronze_source
-    | MERGE (SCD2) / INSERT (FACT) / OVERWRITE (DEDUP)
-    v
-Silver Target (policy_dim, claim_fact, etc.)
-    |
-    v
-silver_load_audit + silver_reconciliation (audit trail)
-```
-
-### Transformation Types
-
-| Type | Description |
-|------|-------------|
-| DIMENSION_SCD2 | SCD Type 2: close old version on change, insert new with is_current=true |
-| FACT | Append new records (deduped by business key) |
-| DEDUP | Overwrite with latest deduplicated records |
-
-### PII Masking
-
-Configured per transformation in `silver_transformation_config.pii_mask_rules` as JSON:
-- `regex_mask`: Phone numbers masked (keep first 3 and last 4 digits)
-- `hash`: Email addresses hashed with SHA-256
-- `partial`: Keep first 2 chars + domain
-
-### Running the Silver Pipeline
-
-The `Silver_Pipeline_Metadata` notebook accepts two widget parameters:
-
-- `load_type`: `INITIAL` or `INCREMENTAL` (default: `INCREMENTAL`)
-- `transformation_filter`: comma-separated transformation names (empty = all)
-
-```python
-# Full refresh of all Silver transformations
-dbutils.notebook.run("Silver_Pipeline_Metadata", 600,
-  {"load_type": "INITIAL", "transformation_filter": ""})
-
-# Incremental load for specific transformations
-dbutils.notebook.run("Silver_Pipeline_Metadata", 600,
-  {"load_type": "INCREMENTAL", "transformation_filter": "policy_dim,claim_dim"})
-```
-
-### Adding a New Silver Transformation
-
-1. Create staging + target Silver tables
-2. Insert a row into `silver_transformation_config` with transformation type, business key, SCD2 columns, PII rules
-3. Run the pipeline with `transformation_filter="{new_transformation}"`
-
-## Querying the Audit Trail
-
-```sql
--- Recent Bronze loads by source
-SELECT substring(load_id, 1, 13) as load_id, source_name, load_type, status,
-       source_row_count, target_row_count_after, rows_inserted
-FROM pc_insurance.reference.bronze_load_audit
-ORDER BY load_start_time DESC LIMIT 10;
-
--- Recent Silver loads by transformation
-SELECT substring(load_id, 1, 13) as load_id, transformation_name, load_type, status,
-       source_row_count, staging_row_count, target_row_count_after, rows_inserted
-FROM pc_insurance.reference.silver_load_audit
-ORDER BY load_start_time DESC LIMIT 10;
-
--- Bronze reconciliation mismatches
-SELECT source_name, match_status, source_row_count, target_row_count,
-       expected_target_count, mismatch_details
-FROM pc_insurance.reference.bronze_reconciliation
-WHERE match_status != "MATCH";
-
--- Silver reconciliation mismatches
-SELECT transformation_name, match_status, source_row_count, staging_row_count,
-       target_row_count, mismatch_details
-FROM pc_insurance.reference.silver_reconciliation
-WHERE match_status != "MATCH";
-```
+> **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architecture details** including metadata-driven framework, data flow diagrams, agent roles, UC security model, pipeline orchestration, and performance optimization.
 
 ## Multi-Agent System
 
@@ -265,7 +110,7 @@ pc-insurance-medallion/
 │   ├── Architect_Agent.py           # MLflow agent for architecture design
 │   ├── Data_Engineer_Agent.py       # MLflow agent for pipeline code
 │   ├── DevOps_Agent.py             # DevOps agent (MLflow)
-│   ├── Domain_Expert_Agent.py      # UC volume domain expert setup
+│   ├── Domain_Expert_Agent.py      # Domain expert agent setup
 │   ├── Domain_Expert_Setup.py       # UC volume with P&C reference docs
 │   ├── Analyst_Genie_Agent.py       # Analyst agent setup
 │   ├── Analyst_Genie_Setup.py       # Genie Space over Gold tables
@@ -288,43 +133,15 @@ pc-insurance-medallion/
 ├── docs/
 │   ├── ARCHITECTURE.md             # Architecture documentation
 │   ├── DATA_DICTIONARY.md          # Column-level data dictionary
-│   ├── DEPLOYMENT.md               # Deployment guide
-│   ├── Git_Automation_Guide.md     # Git automation via MCP app
-│   ├── InsuranceModel_Architecture_Guide.md  # End-to-end architecture guide
+│   ├── DEPLOYMENT.md               # Deployment & getting started guide
 │   └── RUNBOOK.md                  # Operations runbook
 ├── README.md                        # This file
-├── Getting_Started.md               # Newcomer guide
 ├── databricks.yml                   # DAB bundle config
 ├── pyproject.toml                  # Python project config
 └── .gitignore
 ```
 
-### Active Pipelines
-- `pipelines/Bronze_Pipeline.py` - Metadata-driven Auto Loader ingestion (INITIAL + INCREMENTAL)
-- `pipelines/Silver_Pipeline_Metadata.py` - ⭐ **ACTIVE** Metadata-driven Silver pipeline (config-driven SCD2/FACT/DEDUP)
-- `pipelines/Gold_Pipeline.py` - Metadata-driven KPI aggregations and audit
-- `pipelines/Orchestrator.py` - Master pipeline orchestrator (updated to use metadata-driven Silver)
-
-### Agent Setup
-- `agents/Architect_Agent.py` - MLflow agent for architecture design
-- `agents/Data_Engineer_Agent.py` - MLflow agent for pipeline code
-- `agents/DevOps_Agent.py` - DevOps agent (MLflow)
-- `agents/Domain_Expert_Setup.py` - UC volume with P&C reference docs
-- `agents/Analyst_Genie_Setup.py` - Genie Space over Gold tables
-- `agents/Supervisor_Agent_Setup.py` - Multi-agent orchestration
-
-### MCP App
-- `app/app.py` - `pc-insurance-workspace-actions` MCP server (git commits, file writes, SQL execution)
-
-### Documentation
-- `README.md` - This file
-- `Getting_Started.md` - Newcomer guide
-- `docs/ARCHITECTURE.md` - Architecture documentation
-- `docs/DATA_DICTIONARY.md` - Column-level data dictionary
-- `docs/DEPLOYMENT.md` - Deployment guide
-- `docs/RUNBOOK.md` - Operations runbook
-
-## SQL DDL
+### SQL DDL
 
 - `sql/01_catalog_schemas.sql` - Catalog and schema creation
 - `sql/02_bronze_tables.sql` - Bronze table DDL
@@ -332,36 +149,7 @@ pc-insurance-medallion/
 - `sql/04_gold_tables.sql` - Gold table DDL
 - `sql/05_gold_metric_config.sql` - Gold metric configuration
 
-**Note on Silver table DDL:**
-Silver layer tables are created dynamically by `pipelines/Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table; it does not contain static Silver table DDL. The metadata-driven approach allows Silver tables to be defined and modified through configuration rather than static DDL scripts.
-
-## Deploying to Another Environment
-
-The same Git commit can be deployed to `dev`, `staging`, or `prod`.
-
-1. Configure Databricks CLI profiles named `staging` and `prod` for the target workspaces.
-2. Bootstrap the target catalog, schemas, tables, agent resources, and permissions.
-3. Deploy the bundle with environment-specific values:
-
-```bash
-databricks bundle deploy -t staging \
-  --var sql_warehouse_id=<staging-warehouse-id> \
-  --var supervisor_endpoint=<staging-supervisor-endpoint> \
-  --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
-  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
-```
-
-Use the same command with `-t prod` and production values for production. Hosts
-come from the configured Databricks CLI profiles; code does not contain target
-workspace credentials.
-
-## Architecture Documentation
-
-The newcomer-focused end-to-end architecture guide is available in Markdown:
-
-- `docs/InsuranceModel_Architecture_Guide.md`
-- `docs/ARCHITECTURE.md` — Technical architecture reference
+**Note on Silver table DDL:** Silver layer tables are created dynamically by `pipelines/Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table; it does not contain static Silver table DDL.
 
 ## KPI Formulas
 
@@ -370,11 +158,6 @@ The newcomer-focused end-to-end architecture guide is available in Markdown:
 - **Claim Frequency** = Claim Count / Exposure Units
 - **Claim Severity** = Incurred Losses / Claim Count
 - **Retention Rate** = Renewed / (Renewed + Cancelled)
-
-## Repository
-
-- **GitHub**: https://github.com/vedavyasgoparaju/pc-insurance-medallion
-- **Databricks Git Folder**: /Repos/vedavyas.goparaju/pc-insurance-medallion
 
 ## Getting Started
 
@@ -389,32 +172,33 @@ The newcomer-focused end-to-end architecture guide is available in Markdown:
 9. **Deploy MCP App**: Deploy `app/` as `pc-insurance-workspace-actions`
 10. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
 
+> **See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed step-by-step deployment instructions**, including environment setup, agent deployment, MCP app configuration, post-deployment validation, rollback procedures, and troubleshooting.
 
-## Git Automation via MCP App
+## Deploying to Another Environment
 
-The `pc-insurance-workspace-actions` MCP app (`app/app.py`) handles git commits, file writes, and SQL execution. It replaces the former `Git_Automation.py` notebook.
+The same Git commit can be deployed to `dev`, `staging`, or `prod`.
 
-### Features
+```bash
+databricks bundle deploy -t staging \
+  --var sql_warehouse_id=<staging-warehouse-id> \
+  --var supervisor_endpoint=<staging-supervisor-endpoint> \
+  --var workspace_root=/Users/<target-user>/InsuranceModel \
+  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
+  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
+```
 
-- ✅ **Subprocess Git CLI**: Uses `git add`, `git commit`, `git push` via subprocess (robust, no SDK dependency)
-- ✅ **Automatic Commit**: Changes committed after validation success
-- ✅ **Smart Push**: Retry logic handles network issues
-- ✅ **Health Checks**: Validates repository state before operations
-- ✅ **Change Detection**: Only commits when changes are detected
-- ✅ **MCP Integration**: Exposed as tool to Supervisor Agent
+Use the same command with `-t prod` and production values for production.
 
-### Usage
+## Repository
 
-The MCP app runs as a Databricks App and is registered as the 8th tool in the Supervisor Agent. The Supervisor routes git/file/SQL execution requests to it via MCP.
+- **GitHub**: https://github.com/vedavyasgoparaju/pc-insurance-medallion
+- **Databricks Git Folder**: /Repos/vedavyas.goparaju/pc-insurance-medallion
 
-### Documentation
+## Documentation
 
-See [Git Automation Guide](docs/Git_Automation_Guide.md) for detailed documentation.
-
-### Compliance
-
-Ensures compliance with the **Mandatory Change Completion Policy**:
-- All changes are committed after validation
-- Documentation updates are included
-- Audit trail maintained in Git history
-- No manual intervention required
+| Document | Purpose |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full architecture reference: layers, agents, metadata framework, data flow, UC structure, performance |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Setup & deployment guide: prerequisites, step-by-step deployment, MCP app, git automation, rollback |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Operations runbook: daily checklists, monitoring queries, alerts, troubleshooting, incident response |
+| [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md) | Column-level definitions for all tables across Bronze, Silver, and Gold layers |

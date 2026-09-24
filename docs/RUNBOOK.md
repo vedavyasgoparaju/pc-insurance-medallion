@@ -77,40 +77,7 @@ This runbook provides operational procedures for running, monitoring, and troubl
 
 ## Pipeline Execution
 
-### Manual Pipeline Execution
-
-#### Bronze Layer
-
-```python
-# Run Bronze pipeline
-dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Bronze_Pipeline",
-  timeout_seconds=3600,
-  arguments={}
-)
-```
-
-#### Silver Layer
-
-```python
-# Run Silver pipeline (metadata-driven)
-dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Silver_Pipeline_Metadata",
-  timeout_seconds=7200,
-  arguments={}
-)
-```
-
-#### Gold Layer
-
-```python
-# Run Gold pipeline
-dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Gold_Pipeline",
-  timeout_seconds=3600,
-  arguments={}
-)
-```
+> **For manual pipeline execution commands and deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).**
 
 ### Scheduled Job Execution
 
@@ -134,19 +101,7 @@ for run in runs:
     print("-" * 80)
 ```
 
-### Orchestrator Execution
-
-```python
-# Run full orchestrated pipeline
-dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Orchestrator",
-  timeout_seconds=10800,
-  arguments={
-    "run_mode": "full",
-    "layers": "bronze,silver,gold"
-  }
-)
-```
+> **For orchestrator execution commands, see [DEPLOYMENT.md](DEPLOYMENT.md) > Running the Pipelines.**
 
 ---
 
