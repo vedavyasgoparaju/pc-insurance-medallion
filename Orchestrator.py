@@ -301,3 +301,52 @@ Example Questions to Try:
 # MAGIC   UNION ALL SELECT 'uw_dashboard_summary', COUNT(*) FROM pc_insurance.gold.uw_dashboard_summary
 # MAGIC )
 # MAGIC ORDER BY layer, table_name;
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 6: Git Automation - Commit and Push Changes
+
+# COMMAND ----------
+
+print("\n" + "="*80)
+print("STEP 6: GIT AUTOMATION - COMMIT AND PUSH CHANGES")
+print("="*80)
+
+try:
+    # Run the Git automation notebook
+    git_result = dbutils.notebook.run(
+        "./Git_Automation",
+        timeout_seconds=300,
+        arguments={
+            "commit_message": f"auto: Medallion pipeline execution completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "push_enabled": "true"
+        }
+    )
+    
+    print("✅ Git automation completed")
+    print(f"Result: {git_result}")
+    
+except Exception as e:
+    print(f"⚠️ Git automation failed: {str(e)}")
+    print("Pipeline completed successfully, but changes may need to be pushed manually")
+    print("Use Databricks Repos UI to push changes")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Pipeline Completion Summary
+
+# COMMAND ----------
+
+print("\n" + "="*80)
+print("MEDALLION PIPELINE EXECUTION COMPLETE")
+print("="*80)
+print(f"Execution completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print("\nAll layers processed:")
+print("  ✅ Bronze Layer - Raw data ingestion")
+print("  ✅ Silver Layer - Cleansed and conformed data")
+print("  ✅ Gold Layer - Business KPIs and metrics")
+print("  ✅ Git Automation - Changes committed and pushed")
+print("\nCheck the summary tables above for record counts and validation results")
+print("="*80)

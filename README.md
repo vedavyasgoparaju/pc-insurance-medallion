@@ -324,3 +324,46 @@ uv pip install --python .venv/bin/python reportlab
 6. **Run Gold Pipeline**: Execute `Gold_Pipeline`
 7. **Setup Agents**: Run agent setup notebooks
 8. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
+
+
+## Git Automation Workflow
+
+The project includes an automated Git workflow that commits and pushes changes after successful pipeline execution and validation.
+
+### Features
+
+- ✅ **Automatic Commit**: Changes are committed after validation success
+- ✅ **Smart Push**: Retry logic handles network issues
+- ✅ **Health Checks**: Validates repository state before operations
+- ✅ **Change Detection**: Only commits when changes are detected
+- ✅ **Comprehensive Logging**: Detailed execution logs and error messages
+
+### Usage
+
+The Git automation is integrated into the Orchestrator and runs automatically after pipeline completion:
+
+```python
+# Automatically called at the end of Orchestrator.py
+result = dbutils.notebook.run("./Git_Automation", timeout_seconds=300)
+```
+
+### Configuration
+
+Edit `Git_Automation.py` to customize:
+
+- Repository path
+- Retry attempts (default: 3)
+- Retry delay (default: 5 seconds)
+- Commit message format
+
+### Documentation
+
+See [Git Automation Guide](docs/Git_Automation_Guide.md) for detailed documentation.
+
+### Compliance
+
+Ensures compliance with the **Mandatory Change Completion Policy**:
+- All changes are committed after validation
+- Documentation updates are included
+- Audit trail maintained in Git history
+- No manual intervention required
