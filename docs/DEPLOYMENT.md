@@ -416,7 +416,47 @@ ORDER BY loss_ratio DESC;
 
 ### Phase 4: Job Orchestration Setup (20 minutes)
 
-#### Deploy Databricks Asset Bundle
+The project uses 3 jobs with distinct purposes:
+
+| Job | Name | ID | Purpose |
+|---|---|---|---|
+| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only: registers MLflow models, creates serving endpoints, Genie Spaces, Knowledge Assistant, and Supervisor Agent |
+| 2 | `InsuranceModel - Multi-agent orchestrator` | DAB-deployed | Receives user requests, routes to Supervisor Agent, dispatches execution plans |
+| 3 | `InsuranceModel - Multi-agent execution` | DAB-deployed | Executes plans from orchestrator (SQL, file writes, git commits) |
+
+**Architecture**: Agents are set up FIRST (Job 1). The Supervisor Agent then orchestrates pipeline execution on-demand via Jobs 2 and 3. The pipeline is NOT hardcoded in the agent setup job.
+
+#### Phase 4a: Agent Setup Job (Job 1)
+
+Job 1 (`PC_Insurance_Agent_Setup`) runs 5 tasks -- 4 in parallel, then 1 dependent:
+
+1. `architect_agent` -- Registers Architect MLflow model + serving endpoint (parallel)
+2. `data_engineer_agent` -- Registers Data Engineer MLflow model + serving endpoint (parallel)
+3. `domain_expert_setup` -- Creates UC volume + Knowledge Assistant (parallel)
+4. `analyst_genie_setup` -- Adds Gold table comments + creates Analyst Genie Space (parallel)
+5. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-4 complete)
+
+Run manually after Phase 1 (UC setup) and Phase 5 Step 1 (DQ functions) are complete:
+
+```bash
+# Trigger agent setup
+databricks jobs run-now 820361677269451
+```
+
+#### Phase 4b: Pipeline Execution (separate from agent setup)
+
+The data pipeline (Bronze -> Silver -> Gold) should be triggered AFTER agents are set up, either:
+
+**Option A -- Via Supervisor Agent** (recommended): Ask the Supervisor Agent to run the pipeline. The orchestrator (Job 2) routes the request, and the executor (Job 3) runs the SQL/notebooks.
+
+**Option B -- Separate scheduled job**: Create a dedicated pipeline job with Bronze -> Silver -> Gold tasks:
+1. Navigate to Workflows -> Create Job
+2. Name: `PC_Insurance_Data_Pipeline`
+3. Add tasks: Bronze -> Silver -> Gold (sequential dependencies)
+4. Set schedule: Daily at 2:00 AM UTC
+5. Configure notifications
+
+#### Phase 4c: Deploy Databricks Asset Bundle (Jobs 2 and 3)
 
 ```bash
 cd /path/to/local/pc-insurance-medallion
@@ -431,16 +471,9 @@ databricks bundle deploy -t dev
 databricks bundle deploy -t prod
 ```
 
-**Or Create Scheduled Job Manually**:
-1. Navigate to Workflows -> Create Job
-2. Add tasks: Bronze -> Silver -> Gold
-3. Set schedule: Daily at 2:00 AM UTC
-4. Configure notifications
+This deploys Jobs 2 (orchestrator) and 3 (executor) which enable the Supervisor Agent to execute workspace changes.
 
-**Job Name**: `PC_Insurance_MultiAgent_Pipeline`
-**Job ID**: `820361677269451`
-
-### Phase 4b: MCP App Deployment (10 minutes)
+### Phase 4d: MCP App Deployment (10 minutes)
 
 #### Deploy `pc-insurance-workspace-actions`
 
@@ -472,7 +505,7 @@ databricks apps logs pc-insurance-workspace-actions
 
 ### Quick Start (All Pipelines)
 
-The orchestration job runs all pipelines sequentially:
+The data pipeline (Bronze -> Silver -> Gold) is triggered AFTER agent setup is complete. It can be run via the Supervisor Agent or as a standalone job:
 
 ```python
 # Run full orchestrated pipeline
