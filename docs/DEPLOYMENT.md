@@ -416,15 +416,14 @@ ORDER BY loss_ratio DESC;
 
 ### Phase 4: Job Orchestration Setup (20 minutes)
 
-The project uses 3 jobs with distinct purposes:
+The project uses 2 jobs with distinct purposes:
 
 | Job | Name | ID | Purpose |
 |---|---|---|---|
 | 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only: registers MLflow models, creates serving endpoints, Genie Spaces, Knowledge Assistant, and Supervisor Agent |
-| 2 | `InsuranceModel - Multi-agent orchestrator` | DAB-deployed | Receives user requests, routes to Supervisor Agent, dispatches execution plans |
-| 3 | `InsuranceModel - Multi-agent execution` | DAB-deployed | Executes plans from orchestrator (SQL, file writes, git commits) |
+| 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold with sequential dependencies, parameterized by `load_type` (INITIAL or INCREMENTAL) |
 
-**Architecture**: Agents are set up FIRST (Job 1). The Supervisor Agent then orchestrates pipeline execution on-demand via Jobs 2 and 3. The pipeline is NOT hardcoded in the agent setup job.
+**Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app. The pipeline is NOT hardcoded in the agent setup job.
 
 #### Phase 4a: Agent Setup Job (Job 1)
 
@@ -443,35 +442,39 @@ Run manually after Phase 1 (UC setup) and Phase 5 Step 1 (DQ functions) are comp
 databricks jobs run-now 820361677269451
 ```
 
-#### Phase 4b: Pipeline Execution (separate from agent setup)
+#### Phase 4b: Data Pipeline Job (Job 2)
 
-The data pipeline (Bronze -> Silver -> Gold) should be triggered AFTER agents are set up, either:
+Job 2 (`PC_Insurance_Data_Pipeline`) runs 3 tasks sequentially:
 
-**Option A -- Via Supervisor Agent** (recommended): Ask the Supervisor Agent to run the pipeline. The orchestrator (Job 2) routes the request, and the executor (Job 3) runs the SQL/notebooks.
+1. `bronze_pipeline` -- Bronze layer ingestion (parameter: `load_type=INITIAL` or `INCREMENTAL`)
+2. `silver_pipeline` -- Silver layer transformation (depends on bronze, same parameter)
+3. `gold_pipeline` -- Gold layer KPI aggregation (depends on silver)
 
-**Option B -- Separate scheduled job**: Create a dedicated pipeline job with Bronze -> Silver -> Gold tasks:
-1. Navigate to Workflows -> Create Job
-2. Name: `PC_Insurance_Data_Pipeline`
-3. Add tasks: Bronze -> Silver -> Gold (sequential dependencies)
-4. Set schedule: Daily at 2:00 AM UTC
-5. Configure notifications
+**Initial load** (first time):
+```bash
+# Run with INITIAL load type
+databricks jobs run-now 894776717783668 --notebook-params '{"load_type":"INITIAL"}'
+```
 
-#### Phase 4c: Deploy Databricks Asset Bundle (Jobs 2 and 3)
+**Incremental load** (scheduled or on-demand):
+```bash
+# Run with INCREMENTAL load type (default)
+databricks jobs run-now 894776717783668
+```
+
+**Via Supervisor Agent** (on-demand): Ask the Supervisor Agent to run the pipeline. The Supervisor Agent uses the MCP app's `run_notebook` tool to trigger Bronze, then Silver, then Gold sequentially.
+
+**Schedule** (optional): Set a cron schedule on Job 2 for automated incremental loads (e.g., daily at 2:00 AM UTC).
+
+#### Phase 4c: Databricks Asset Bundle (optional)
+
+The `databricks.yml` file defines bundle variables (`supervisor_endpoint`, `sql_warehouse_id`, `workspace_root`, etc.) but has no resource files in `resources/`. It is used for variable management only. If you need to deploy orchestrated jobs via DAB in the future, add resource YAML files to `resources/` and run:
 
 ```bash
 cd /path/to/local/pc-insurance-medallion
-
-# Validate
 databricks bundle validate
-
-# Deploy to dev
 databricks bundle deploy -t dev
-
-# Deploy to production
-databricks bundle deploy -t prod
 ```
-
-This deploys Jobs 2 (orchestrator) and 3 (executor) which enable the Supervisor Agent to execute workspace changes.
 
 ### Phase 4d: MCP App Deployment (10 minutes)
 
