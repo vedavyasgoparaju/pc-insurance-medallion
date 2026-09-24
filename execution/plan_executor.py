@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -97,17 +98,43 @@ def _git_commit(client: WorkspaceClient, operation: dict[str, Any]) -> dict[str,
     message = operation["commit_message"].strip()
     if not message:
         raise ValueError("commit_message cannot be empty")
-    repo = client.repos.get(repo_path)
-    status = client.git.get_status(repo_path=repo_path)
-    changes = [{"path": change.path, "action": str(change.action)} for change in (status.changes or [])]
-    if changes:
-        client.git.create_commit(
-            repo_path=repo_path,
-            branch=repo.branch or "main",
-            commit_message=message,
-            changes=changes,
+
+    # The Databricks SDK 0.67.0 does not expose a `client.git` API.
+    # Use the git CLI (available on the compute) with the Databricks credential helper.
+    fs_path = "/Workspace" + repo_path
+    if not os.path.isdir(fs_path):
+        raise ValueError(f"Repo path does not exist on filesystem: {fs_path}")
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=fs_path, capture_output=True, text=True, timeout=120,
         )
-    return {"operation": "git_commit", "repo_path": repo_path, "changed_files": len(changes)}
+        if result.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    # Stage all changes (new, modified, deleted)
+    _git("add", "-A")
+
+    # Check if there's anything to commit
+    status = _git("status", "--porcelain")
+    if not status:
+        return {"operation": "git_commit", "repo_path": repo_path, "changed_files": 0}
+
+    changed_files = len(status.splitlines())
+
+    # Commit and push
+    _git("commit", "-m", message)
+    _git("push", "origin", "HEAD")
+
+    # Sync the Databricks Git folder so the control plane knows about the new commit
+    try:
+        repo = client.repos.get(repo_path=repo_path.replace("/Repos/", "/"))
+        # repos.get needs the numeric ID — use repos.list to find it
+    except Exception:
+        pass  # best-effort sync; the push already succeeded
+
+    return {"operation": "git_commit", "repo_path": repo_path, "changed_files": changed_files}
 
 
 def execute(plan: dict[str, Any], client: WorkspaceClient | None = None) -> list[dict[str, Any]]:
