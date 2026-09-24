@@ -265,6 +265,9 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
 - `sql/02_bronze_tables.sql` - Bronze table DDL
 - `sql/04_gold_tables.sql` - Gold table DDL
 
+**Note on sql/03_silver_tables.sql:**
+Silver layer tables are created dynamically by `Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. Therefore, `sql/03_silver_tables.sql` is intentionally absent. The metadata-driven approach allows Silver tables to be defined and modified through configuration rather than static DDL scripts.
+
 ## Deploying to Another Environment
 
 The same Git commit can be deployed to `dev`, `staging`, or `prod`.

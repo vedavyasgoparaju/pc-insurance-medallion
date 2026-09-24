@@ -72,6 +72,7 @@ The Git repository contains both application source and deployment source.
 | File | Responsibility |
 |---|---|
 | `Supervisor_Agent_Setup.py` | Creates/configures the Supervisor Agent and registers specialist tools. |
+| Git_Automation.py | Automated Git commit and push workflow |
 | `Architect_Agent.py` | Creates the architecture specialist serving endpoint. |
 | `Data_Engineer_Agent.py` | Creates the data engineering specialist serving endpoint. |
 | `Domain_Expert_Setup.py` | Creates the P&C domain knowledge resource. |
@@ -391,6 +392,9 @@ Workspace hosts are supplied by the `staging` and `prod` Databricks CLI profiles
 - [ ] Gold audit has one successful row per active metric.
 - [ ] Request queue test completes successfully.
 - [ ] Rollback commit and Job run history are recorded.
+- [ ] Verify Git_Automation.py configuration (REPO_PATH matches environment)
+- [ ] Test automated Git push workflow in target environment
+- [ ] Configure email notifications for Git automation failures
 
 ---
 
