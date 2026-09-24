@@ -85,7 +85,7 @@ This document describes the Medallion architecture for the Property & Casualty (
 | agents_raw | Agent Admin | 50 | agent_id |
 
 ### Implementation
-- **Notebook**: `Bronze_Pipeline.py`
+- **Notebook**: `pipelines/Bronze_Pipeline.py`
 - **Format**: Delta Lake
 - **Partitioning**: By ingestion date
 - **Refresh**: Daily full load (demo) / CDC in production
@@ -149,7 +149,7 @@ Validates:
 | claim_fact | Claim snapshot | claim_id, report_date | loss_date |
 
 ### Implementation
-- **Notebook**: `Silver_Pipeline_Metadata.py`
+- **Notebook**: `pipelines/Silver_Pipeline_Metadata.py`
 - **Format**: Delta Lake
 - **SCD2**: Managed via metadata config
 - **DQ Checks**: Inline expectations
@@ -199,7 +199,7 @@ Tracks:
 | uw_dashboard_summary | LOB × State | Comprehensive UW Metrics | Daily |
 
 ### Implementation
-- **Notebook**: `Gold_Pipeline.py`
+- **Notebook**: `pipelines/Gold_Pipeline.py`
 - **Format**: Delta Lake
 - **Optimization**: Z-ordering on key dimensions
 - **Refresh**: Scheduled based on metadata config
@@ -208,18 +208,31 @@ Tracks:
 
 ### Agent Roles
 
-1. **Architect Agent**: Designs schemas and data flow
-2. **Data Engineer Agent**: Implements pipelines
-3. **Domain Expert Agent**: Provides P&C insurance knowledge
-4. **Analyst Agent**: Queries Gold layer KPIs
-5. **Supervisor Agent**: Orchestrates multi-agent workflows
-6. **DevOps Agent**: Provides Git/CI-CD guidance
+1. **Architect Agent** (serving_endpoint `pc_architect_agent`): Designs schemas and data flow
+2. **Data Engineer Agent** (serving_endpoint `pc_data_engineer_agent`): Implements pipelines
+3. **P&C Domain Expert Agent** (volume `pc_insurance.reference.pc_domain_docs`): Provides P&C insurance knowledge
+4. **QA Validator Agent** (uc_function `pc_insurance.dq.calculate_dq_score`): Runs data quality validation
+5. **Analyst Agent** (genie_space): Queries Gold layer KPIs
+6. **Documentation Agent** (genie_space): Generates and queries technical documentation
+7. **DevOps Agent** (genie_space): Provides Git/CI-CD GUIDANCE ONLY (no execution)
+8. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`): EXECUTES workspace changes (git commits, file writes, SQL)
+
+**Supervisor Endpoint**: `mas-56389669-endpoint`
+
+### Anti-Routing Rules
+
+1. KPI questions → Analyst only (never DevOps or Documentation)
+2. Git execution → Workspace-Actions (DevOps is guidance only)
+3. Architecture design → Architect (not Data Engineer)
+4. Code implementation → Data Engineer (not Architect)
+5. Domain definitions → Domain Expert (not Analyst)
+6. DevOps → Guidance only (cannot execute Git operations)
 
 ### Orchestration
 
-- **Orchestrator**: `Orchestrator.py`
+- **Orchestrator**: `pipelines/Orchestrator.py`
 - **Execution Framework**: `execution/orchestrator.py`, `execution/plan_executor.py`
-- **Job Definition**: `resources/multi_agent_execution_job.yml`
+- **Job Definition**: `databricks.yml` (Declarative Automation Bundle)
 
 ## Data Quality Framework
 
@@ -252,8 +265,8 @@ Tracks:
 ### CI/CD Pipeline
 
 - **Git Repository**: `/Repos/vedavyas.goparaju/pc-insurance-medallion`
-- **Workflow**: `resources/git_auto_push_workflow.yml`
-- **Automation**: `Git_Automation.py`
+- **MCP App**: `app/app.py` (`pc-insurance-workspace-actions`) handles git commits via subprocess CLI
+- **Bundle Config**: `databricks.yml`
 
 ## Security & Governance
 
@@ -318,6 +331,6 @@ Tracks:
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: 2026-09-24  
+**Version**: 2.0  
+**Last Updated**: 2026-09-25  
 **Owner**: Data Engineering Team

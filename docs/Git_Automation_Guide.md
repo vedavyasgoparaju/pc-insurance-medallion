@@ -8,9 +8,9 @@ The Git Automation Workflow automatically commits and pushes changes to the Git 
 
 ### Components
 
-1. **Git_Automation.py** - Core automation notebook with retry logic and error handling
-2. **Orchestrator.py** - Integrated with Git automation as final step
-3. **git_auto_push_workflow.yml** - Databricks workflow configuration for scheduled/triggered execution
+1. **app/app.py** - MCP server (`pc-insurance-workspace-actions`) with subprocess git CLI (git add, commit, push)
+2. **pipelines/Orchestrator.py** - Pipeline orchestrator (can trigger git via MCP app)
+3. **app/app.yaml** - Databricks App configuration for the MCP server
 
 ### Workflow Flow
 
@@ -19,7 +19,7 @@ Pipeline Execution
        ↓
 Validation Success
        ↓
-Git Automation (Git_Automation.py)
+MCP App (app/app.py — pc-insurance-workspace-actions)
        ↓
    ┌─────────────────┐
    │ 1. Health Check │ ← Verify repo state, remote config, branch
@@ -30,15 +30,15 @@ Git Automation (Git_Automation.py)
    └────────┬────────┘
             ↓
    ┌─────────────────┐
-   │ 3. Stage All    │ ← git add -A
+   │ 3. Stage All    │ ← git add -A (subprocess)
    └────────┬────────┘
             ↓
    ┌─────────────────┐
-   │ 4. Commit       │ ← git commit -m "message"
+   │ 4. Commit       │ ← git commit -m "message" (subprocess)
    └────────┬────────┘
             ↓
    ┌─────────────────┐
-   │ 5. Push (retry) │ ← git push origin main (with retries)
+   │ 5. Push (retry) │ ← git push origin main (subprocess, with retries)
    └────────┬────────┘
             ↓
       Success/Failure
@@ -77,51 +77,50 @@ Git Automation (Git_Automation.py)
 
 ## Usage
 
-### Basic Usage (in Orchestrator)
+### Basic Usage (via MCP App)
+
+The git automation is handled by the `pc-insurance-workspace-actions` MCP app. The Supervisor Agent routes git/file/SQL execution requests to it:
 
 ```python
-# At the end of Orchestrator.py
-result = dbutils.notebook.run(
-    "./Git_Automation",
-    timeout_seconds=300
-)
+# The MCP app exposes tools that the Supervisor Agent can call
+# Git operations are executed via subprocess CLI:
+#   subprocess.run(["git", "add", "-A"], cwd=repo_path)
+#   subprocess.run(["git", "commit", "-m", commit_message], cwd=repo_path)
+#   subprocess.run(["git", "push", "origin", "main"], cwd=repo_path)
 ```
 
 ### With Custom Parameters
 
+The MCP app accepts parameters via MCP tool calls:
+
 ```python
-result = dbutils.notebook.run(
-    "./Git_Automation",
-    timeout_seconds=300,
-    arguments={
-        "commit_message": "feat: added new Gold KPI for loss ratio by region",
-        "push_enabled": "true"
-    }
-)
+# Parameters passed through MCP protocol:
+# - commit_message: Custom commit message (default: auto-generated with timestamp)
+# - push_enabled: Enable/disable push (default: true)
+# - repo_path: Repository path (default: configured in app)
 ```
 
-### Direct Function Call (in Git_Automation.py)
+### Direct App invocation
 
-```python
-# Import and call the main function
-result = auto_commit_and_push(
-    commit_message="fix: corrected SCD2 logic in Silver pipeline",
-    author="Data Engineer <engineer@company.com>",
-    push_enabled=True
-)
+To restart or check the MCP app:
 
-# Check result
-if result['success']:
-    print(f"✅ Changes committed and pushed: {result['commit_hash']}")
-else:
-    print(f"❌ Failed: {result['messages']}")
+```bash
+# Check app status
+databricks apps get pc-insurance-workspace-actions
+
+# View app logs
+databricks apps logs pc-insurance-workspace-actions
+
+# Restart the app
+databricks apps stop pc-insurance-workspace-actions
+databricks apps start pc-insurance-workspace-actions
 ```
 
 ## Configuration
 
 ### Environment Variables
 
-Set these in Git_Automation.py:
+Set these in `app/app.py`:
 
 ```python
 # Repository path
@@ -132,16 +131,16 @@ MAX_PUSH_RETRIES = 3
 RETRY_DELAY_SECONDS = 5
 ```
 
-### Function Parameters
+### MCP Tool Parameters
 
-#### `auto_commit_and_push()`
+The MCP app exposes git operations as tools. Parameters:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `commit_message` | str | Auto-generated | Custom commit message |
-| `author` | str | None | Author string (e.g., "Name <email>") |
-| `skip_if_no_changes` | bool | True | Skip commit when no changes detected |
 | `push_enabled` | bool | True | Enable/disable push to remote |
+| `repo_path` | str | Configured | Override repository path |
+| `skip_if_no_changes` | bool | True | Skip commit when no changes detected |
 
 ## Return Value
 
@@ -191,49 +190,30 @@ If no changes are detected:
 - Workflow skips commit (default behavior)
 - Can be overridden with `skip_if_no_changes=False`
 
-## Databricks Workflow Integration
+## Databricks App Integration
 
-### Standalone Workflow
+### MCP App Deployment
 
-Deploy the workflow:
-
-```bash
-databricks bundle deploy -t dev
-```
-
-Run manually:
+The `pc-insurance-workspace-actions` MCP app runs as a Databricks App:
 
 ```bash
-databricks jobs run-now --job-id <job-id>
+# Deploy the app
+databricks apps deploy pc-insurance-workspace-actions
+
+# Check status
+databricks apps get pc-insurance-workspace-actions
+
+# View logs
+databricks apps logs pc-insurance-workspace-actions
 ```
 
-### Scheduled Execution
+### Supervisor Agent Integration
 
-Uncomment the schedule block in `git_auto_push_workflow.yml`:
-
-```yaml
-schedule:
-  quartz_cron_expression: "0 0 2 * * ?"  # Daily at 2 AM
-  timezone_id: "America/New_York"
-  pause_status: "UNPAUSED"
-```
+The MCP app is registered as the 8th tool in the Supervisor Agent. The Supervisor routes git/file/SQL execution requests to it via MCP protocol. No separate job or workflow needed — the MCP app is always available when running.
 
 ### Triggered After Pipeline
 
-Chain workflows:
-
-```yaml
-tasks:
-  - task_key: run_pipeline
-    notebook_task:
-      notebook_path: "/Repos/.../Orchestrator"
-  
-  - task_key: git_push
-    depends_on:
-      - task_key: run_pipeline
-    notebook_task:
-      notebook_path: "/Repos/.../Git_Automation"
-```
+The Supervisor Agent can orchestrate git commits after pipeline completion by routing the request to the MCP app tool.
 
 ## Compliance with Mandatory Change Completion Policy
 
@@ -261,7 +241,7 @@ This Git automation ensures compliance with the project's **Mandatory Change Com
 **Cause**: Repository not initialized or path incorrect
 
 **Solutions**:
-1. Verify `REPO_PATH` in Git_Automation.py
+1. Verify `REPO_PATH` in `app/app.py`
 2. Ensure Databricks Repo is properly cloned
 3. Check Git folder exists: `/Workspace/Repos/<user>/<repo>/.git`
 
@@ -279,7 +259,7 @@ git remote add origin https://github.com/<user>/<repo>.git
 
 **Cause**: No changes detected (expected behavior)
 
-**Action**: No action needed - workflow skips commit
+**Action**: No action needed - MCP app skips commit
 
 ## Best Practices
 
@@ -318,31 +298,36 @@ git remote add origin https://github.com/<user>/<repo>.git
 
 To update the Git automation:
 
-1. Modify `Git_Automation.py`
-2. Test in development environment
-3. Deploy to production via bundle
-4. Monitor first few automated runs
+1. Modify `app/app.py` in the repo
+2. Commit and push changes to GitHub
+3. Redeploy the MCP app: `databricks apps deploy pc-insurance-workspace-actions`
+4. Monitor first few automated runs via app logs
 
 ## Support
 
 For issues or questions:
 
-- **Architecture**: ARCHITECT agent
-- **Implementation**: DATA ENGINEER agent
-- **Deployment**: DEVOPS agent
-- **Documentation**: DOCUMENTATION agent
+- **Architecture**: Architect agent
+- **Implementation**: Data Engineer agent
+- **Deployment**: DevOps agent (guidance only)
+- **Git execution**: Workspace-Actions MCP app
+- **Documentation**: Documentation agent
 
 ## Version History
 
+- **v2.0** (2026-09-25): MCP App migration
+  - Replaced `Git_Automation.py` with MCP app `app/app.py`
+  - Uses subprocess git CLI (robust, no SDK dependency)
+  - Integrated as 8th tool in Supervisor Agent
+  - Removed `git_auto_push_workflow.yml` (no longer needed)
 - **v1.0** (2026-09-24): Initial implementation
-  - Core automation functions
+  - Core automation functions (Git_Automation.py — now deprecated)
   - Retry logic for push
   - Repository health checks
   - Integration with Orchestrator
-  - Databricks workflow configuration
 
 ---
 
-**Last Updated**: 2026-09-24
+**Last Updated**: 2026-09-25
 **Maintained By**: DevOps Team
 **Status**: Production Ready

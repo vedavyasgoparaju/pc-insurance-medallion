@@ -1,8 +1,8 @@
 # P&C Insurance Medallion Architecture
 ## Complete Architecture Guide with Multi-Agent System
 
-**Version:** 2.0  
-**Last Updated:** 2026-09-24  
+**Version:** 3.0  
+**Last Updated:** 2026-09-25  
 **Repository:** `vedavyasgoparaju/pc-insurance-medallion`  
 **Workspace:** `https://dbc-ec4d2e3d-58c3.cloud.databricks.com`
 
@@ -28,7 +28,7 @@
 The P&C Insurance Medallion Architecture is a comprehensive data platform built on Databricks that implements:
 
 - **Medallion Architecture**: Bronze → Silver → Gold layers
-- **Multi-Agent System**: 7 specialized AI agents for different domains
+- **Multi-Agent System**: 8 specialized AI tools (7 agents + 1 MCP server) for different domains
 - **Metadata-Driven Pipelines**: Configuration-based Silver and Gold transformations
 - **Unity Catalog Governance**: Centralized data governance and security
 - **Declarative Automation**: DAB-based deployment and CI/CD
@@ -65,7 +65,7 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 - Partitioned by ingestion date
 - Delta Lake format
 
-**Implementation**: `Bronze_Pipeline.py`
+**Implementation**: `pipelines/Bronze_Pipeline.py`
 
 ### Silver Layer (Cleansed & Conformed)
 
@@ -91,7 +91,7 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 - **Audit Logging**: Every run logged in `silver_load_audit`
 - **Reconciliation**: Source vs target counts in `silver_reconciliation`
 
-**Implementation**: `Silver_Pipeline_Metadata.py`
+**Implementation**: `pipelines/Silver_Pipeline_Metadata.py`
 
 ### Gold Layer (Business KPIs)
 
@@ -112,7 +112,7 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 - **Audit Logging**: Every refresh logged in `gold_refresh_audit`
 - **Data Quality Scores**: DQ metrics tracked per refresh
 
-**Implementation**: `Gold_Pipeline.py`
+**Implementation**: `pipelines/Gold_Pipeline.py`
 
 ---
 
@@ -139,6 +139,15 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
         │   Analyst    │ │  DevOps  │ │     QA     │
         │    Agent     │ │   Agent  │ │ Validator  │
         └──────────────┘ └──────────┘ └────────────┘
+                │              │              
+        ┌───────▼──────────────▼──────┐
+        │ Documentation Agent         │
+        └────────────────────┬────────┘
+                             │
+                ┌────────────▼─────────────┐
+                │ Workspace-Actions (MCP)  │
+                │  (Git, File, SQL Exec)   │
+                └──────────────────────────┘
 ```
 
 ### Agent Communication Flow

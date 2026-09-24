@@ -84,7 +84,7 @@ This runbook provides operational procedures for running, monitoring, and troubl
 ```python
 # Run Bronze pipeline
 dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/Bronze_Pipeline",
+  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Bronze_Pipeline",
   timeout_seconds=3600,
   arguments={}
 )
@@ -95,7 +95,7 @@ dbutils.notebook.run(
 ```python
 # Run Silver pipeline (metadata-driven)
 dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/Silver_Pipeline_Metadata",
+  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Silver_Pipeline_Metadata",
   timeout_seconds=7200,
   arguments={}
 )
@@ -106,7 +106,7 @@ dbutils.notebook.run(
 ```python
 # Run Gold pipeline
 dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/Gold_Pipeline",
+  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Gold_Pipeline",
   timeout_seconds=3600,
   arguments={}
 )
@@ -139,7 +139,7 @@ for run in runs:
 ```python
 # Run full orchestrated pipeline
 dbutils.notebook.run(
-  "/Repos/vedavyas.goparaju/pc-insurance-medallion/Orchestrator",
+  "/Repos/vedavyas.goparaju/pc-insurance-medallion/pipelines/Orchestrator",
   timeout_seconds=10800,
   arguments={
     "run_mode": "full",
@@ -602,7 +602,7 @@ audit_df.coalesce(1).write.mode("overwrite").option("header", "true").csv("/tmp/
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: 2026-09-24  
+**Version**: 2.0  
+**Last Updated**: 2026-09-25  
 **Owner**: Data Engineering Team  
 **Review Frequency**: Quarterly

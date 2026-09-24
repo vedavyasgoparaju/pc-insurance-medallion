@@ -210,14 +210,14 @@ dbutils.fs.cp(
 ```python
 # Test Domain Expert Agent
 result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/Domain_Expert_Agent",
+  "/Repos/your-username/pc-insurance-medallion/agents/Domain_Expert_Agent",
   timeout_seconds=300
 )
 print(result)
 
 # Test Analyst Agent
 result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/Analyst_Genie_Agent",
+  "/Repos/your-username/pc-insurance-medallion/agents/Analyst_Genie_Agent",
   timeout_seconds=300
 )
 print(result)
@@ -229,7 +229,7 @@ print(result)
 
 ```python
 result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/Bronze_Pipeline",
+  "/Repos/your-username/pc-insurance-medallion/pipelines/Bronze_Pipeline",
   timeout_seconds=1800
 )
 print(f"Bronze Pipeline Result: {result}")
@@ -248,7 +248,7 @@ SELECT 'claims_raw', COUNT(*) FROM pc_insurance.bronze.claims_raw;
 
 ```python
 result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/Silver_Pipeline_Metadata",
+  "/Repos/your-username/pc-insurance-medallion/pipelines/Silver_Pipeline_Metadata",
   timeout_seconds=3600
 )
 print(f"Silver Pipeline Result: {result}")
@@ -271,7 +271,7 @@ ORDER BY run_timestamp DESC LIMIT 10;
 
 ```python
 result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/Gold_Pipeline",
+  "/Repos/your-username/pc-insurance-medallion/pipelines/Gold_Pipeline",
   timeout_seconds=1800
 )
 print(f"Gold Pipeline Result: {result}")
@@ -308,6 +308,33 @@ databricks bundle deploy -t prod
 2. Add tasks: Bronze → Silver → Gold
 3. Set schedule: Daily at 2:00 AM UTC
 4. Configure notifications
+
+### Phase 4b: MCP App Deployment (10 minutes)
+
+#### Deploy `pc-insurance-workspace-actions`
+
+The MCP app (`app/app.py`) provides git commit, file write, and SQL execution capabilities to the Supervisor Agent.
+
+```bash
+# Deploy via Databricks CLI
+databricks apps deploy pc-insurance-workspace-actions \
+  --source-file app/app.py
+```
+
+Or via the Databricks UI:
+1. Navigate to Apps → Create App
+2. Name: `pc-insurance-workspace-actions`
+3. Source: `app/app.py`
+4. Config: `app/app.yaml`
+5. Requirements: `app/requirements.txt`
+6. Click Deploy
+
+#### Register as Supervisor Agent Tool
+
+Add the MCP app as the 8th tool in the Supervisor Agent configuration:
+- **Tool ID**: `workspace-actions`
+- **Type**: MCP server
+- **Description**: Executes workspace changes (git commits, file writes, SQL execution)
 
 ### Phase 5: Monitoring Setup (15 minutes)
 
@@ -347,11 +374,11 @@ HAVING dq_score < 0.95;
 
 ```python
 print("Running Bronze...")
-bronze_result = dbutils.notebook.run("/Repos/.../Bronze_Pipeline", 1800)
+bronze_result = dbutils.notebook.run("/Repos/.../pipelines/Bronze_Pipeline", 1800)
 print("Running Silver...")
-silver_result = dbutils.notebook.run("/Repos/.../Silver_Pipeline_Metadata", 3600)
+silver_result = dbutils.notebook.run("/Repos/.../pipelines/Silver_Pipeline_Metadata", 3600)
 print("Running Gold...")
-gold_result = dbutils.notebook.run("/Repos/.../Gold_Pipeline", 1800)
+gold_result = dbutils.notebook.run("/Repos/.../pipelines/Gold_Pipeline", 1800)
 print("✓ End-to-end pipeline completed!")
 ```
 
@@ -417,11 +444,12 @@ dbutils.notebook.run(notebook_path, timeout_seconds=7200)
 | Environment Setup | 2-4 hours |
 | Schema Creation | 15 minutes |
 | Agent Setup | 20 minutes |
+| MCP App Deployment | 10 minutes |
 | Pipeline Deployment | 30 minutes |
 | Job Orchestration | 20 minutes |
 | Monitoring Setup | 15 minutes |
 | Validation | 30 minutes |
-| **Total** | **~2 hours** (after prerequisites) |
+| **Total** | **~2.5 hours** (after prerequisites) |
 
 ---
 
@@ -437,6 +465,6 @@ dbutils.notebook.run(notebook_path, timeout_seconds=7200)
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2026-09-24  
+**Document Version**: 2.0  
+**Last Updated**: 2026-09-25  
 **Owner**: Data Engineering Team

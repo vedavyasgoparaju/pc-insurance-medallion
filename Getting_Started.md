@@ -30,15 +30,47 @@ This project implements a multi-layered data platform for Property & Casualty (P
 
 ```
 pc-insurance-medallion/
-├── Bronze_Pipeline.py          # Data generation & ingestion (5 Bronze tables)
-├── Silver_Pipeline_Metadata.py # SCD2, PII masking, DQ checks (7 Silver tables)
-├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
-├── Orchestrator.py             # Multi-agent orchestration setup
-├── Agent_Setup.py              # MLflow agent registration & serving endpoints
-├── plan_executor.py            # MCP server action execution
-├── README.md                   # Project documentation
-├── Getting_Started.md          # This file
-└── databricks.yml              # DAB bundle config (optional)
+├── pipelines/
+│   ├── Bronze_Pipeline.py          # Data generation & ingestion (5 Bronze tables)
+│   ├── Silver_Pipeline_Metadata.py # SCD2, PII masking, DQ checks (7 Silver tables)
+│   ├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
+│   └── Orchestrator.py             # Master pipeline orchestrator
+├── agents/
+│   ├── Architect_Agent.py           # MLflow agent for architecture design
+│   ├── Data_Engineer_Agent.py       # MLflow agent for pipeline code
+│   ├── DevOps_Agent.py             # DevOps agent (MLflow)
+│   ├── Domain_Expert_Agent.py      # Domain expert agent setup
+│   ├── Domain_Expert_Setup.py       # UC volume with P&C reference docs
+│   ├── Analyst_Genie_Agent.py       # Analyst agent setup
+│   ├── Analyst_Genie_Setup.py       # Genie Space over Gold tables
+│   └── Supervisor_Agent_Setup.py    # Multi-agent orchestration setup
+├── app/
+│   ├── app.py                      # MCP server (pc-insurance-workspace-actions)
+│   ├── app.yaml                    # Databricks App config
+│   └── requirements.txt            # Python dependencies
+├── execution/
+│   ├── orchestrator.py             # MCP server action orchestration
+│   └── plan_executor.py            # MCP server action execution
+├── sql/
+│   ├── 01_catalog_schemas.sql      # Catalog and schema creation
+│   ├── 02_bronze_tables.sql        # Bronze table DDL
+│   ├── 03_silver_transformation_config.sql  # Silver transformation metadata
+│   ├── 04_gold_tables.sql          # Gold table DDL
+│   └── 05_gold_metric_config.sql   # Gold metric configuration
+├── utils/
+│   └── common_utils.py             # Shared utility functions
+├── docs/
+│   ├── ARCHITECTURE.md             # Architecture documentation
+│   ├── DATA_DICTIONARY.md          # Column-level data dictionary
+│   ├── DEPLOYMENT.md               # Deployment guide
+│   ├── Git_Automation_Guide.md     # Git automation via MCP app
+│   ├── InsuranceModel_Architecture_Guide.md  # End-to-end architecture guide
+│   └── RUNBOOK.md                  # Operations runbook
+├── README.md                        # Project documentation
+├── Getting_Started.md               # This file
+├── databricks.yml                   # DAB bundle config
+├── pyproject.toml                  # Python project config
+└── .gitignore
 ```
 
 ---
@@ -77,7 +109,7 @@ CREATE SCHEMA IF NOT EXISTS pc_insurance.dq;
 
 The Bronze pipeline generates sample P&C insurance data and ingests it into Delta tables.
 
-**Notebook**: `Bronze_Pipeline.py`
+**Notebook**: `pipelines/Bronze_Pipeline.py`
 
 ```python
 # Run the Bronze pipeline notebook
@@ -90,7 +122,7 @@ The Bronze pipeline generates sample P&C insurance data and ingests it into Delt
 
 The Silver pipeline transforms Bronze data into conformed dimensions and facts.
 
-**Notebook**: `Silver_Pipeline_Metadata.py`
+**Notebook**: `pipelines/Silver_Pipeline_Metadata.py`
 
 Key transformations:
 - **Deduplication**: Row number window by natural key, keeping latest
@@ -102,7 +134,7 @@ Key transformations:
 
 The Gold pipeline builds executive KPI aggregations from Silver fact tables.
 
-**Notebook**: `Gold_Pipeline.py`
+**Notebook**: `pipelines/Gold_Pipeline.py`
 
 Output tables (all quarterly grain by line of business):
 
@@ -233,11 +265,12 @@ git clone https://github.com/vedavyasgoparaju/pc-insurance-medallion.git
 
 - [ ] Verify Unity Catalog is enabled in your workspace
 - [ ] Create catalog `pc_insurance` and 5 schemas
-- [ ] Run `Bronze_Pipeline.py` to generate and ingest data
-- [ ] Run `Silver_Pipeline_Metadata.py` for SCD2 transformations
-- [ ] Run `Gold_Pipeline.py` for KPI aggregations
+- [ ] Run `pipelines/Bronze_Pipeline.py` to generate and ingest data
+- [ ] Run `pipelines/Silver_Pipeline_Metadata.py` for SCD2 transformations
+- [ ] Run `pipelines/Gold_Pipeline.py` for KPI aggregations
 - [ ] Verify data quality with `calculate_dq_score`
 - [ ] Deploy serving endpoints for `pc_architect_agent` and `pc_data_engineer_agent`
+- [ ] Deploy MCP app `pc-insurance-workspace-actions` from `app/`
 - [ ] Configure the Supervisor Agent with all 8 tools
 - [ ] Test the supervisor endpoint with a sample query
 - [ ] Clone the GitHub repo to your Databricks Git folder
@@ -246,7 +279,7 @@ git clone https://github.com/vedavyasgoparaju/pc-insurance-medallion.git
 
 ## Support
 
-- **Project Documentation**: Query the `pc_insurance.reference.project_documentation` table (37 entries)
+- **Project Documentation**: Query the `pc_insurance.reference.project_documentation` table (44 entries)
 - **Domain Knowledge**: UC Volume `pc_insurance.reference.pc_domain_docs` (P&C insurance guide)
 - **Supervisor Agent**: Query `mas-56389669-endpoint` for any project question
 - **GitHub Issues**: https://github.com/vedavyasgoparaju/pc-insurance-medallion/issues

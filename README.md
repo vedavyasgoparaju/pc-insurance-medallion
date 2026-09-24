@@ -15,15 +15,16 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Gold load audit** tracking every configured KPI refresh
 - **Both INITIAL and INCREMENTAL load** patterns supported
 
-## Recent Changes (2026-09-24)
+## Recent Changes (2026-09-25)
 
-### Repository Cleanup
-- ❌ **Removed:** `Silver_Pipeline.py` (obsolete hardcoded transformations)
+### Repository Restructuring
+- 📁 **New folder hierarchy**: `pipelines/`, `agents/`, `app/`, `execution/`, `utils/`, `sql/`, `docs/`
+- ❌ **Removed:** `Silver_Pipeline.py` (obsolete), `Git_Automation.py` (replaced by MCP app), `CLEANUP_SUMMARY.md`, `CLEANUP_FINAL_REPORT.txt`, `tools/`, `resources/`, `.vscode/`
 - ✅ **Active:** `Silver_Pipeline_Metadata.py` (metadata-driven framework)
-- 📝 **Updated:** `Orchestrator.py` now uses metadata-driven Silver pipeline
-- 📄 **Added:** `CLEANUP_SUMMARY.md` and `CLEANUP_FINAL_REPORT.txt`
+- 📝 **Updated:** All pipeline notebooks moved to `pipelines/`, agent scripts to `agents/`
+- 🔧 **MCP App:** `app/app.py` — `pc-insurance-workspace-actions` handles git commits, file writes, and SQL execution via subprocess git CLI
 
-**Reason:** Ensures full compliance with the Metadata-Driven Silver and Gold Mandate. All Silver transformations are now config-driven via `silver_transformation_config`.
+**Reason:** Production-ready codebase with clean folder structure. All Silver transformations are config-driven via `silver_transformation_config`.
 
 ## Architecture
 
@@ -229,44 +230,110 @@ WHERE match_status != "MATCH";
 
 ## Multi-Agent System
 
-Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
+Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 8 tools (7 subagents + 1 MCP server):
 
-1. **Architect** (serving_endpoint) - Architecture design
-2. **Data Engineer** (serving_endpoint) - Pipeline code generation
-3. **Domain Expert** (volume) - P&C insurance domain knowledge
-4. **QA Validator** (uc_function) - Data quality validation
+1. **Architect** (serving_endpoint `pc_architect_agent`) - Architecture design
+2. **Data Engineer** (serving_endpoint `pc_data_engineer_agent`) - Pipeline code generation
+3. **P&C Domain Expert** (volume `pc_insurance.reference.pc_domain_docs`) - P&C insurance domain knowledge
+4. **QA Validator** (uc_function `pc_insurance.dq.calculate_dq_score`) - Data quality validation
 5. **Analyst** (genie_space) - Gold layer KPI queries
 6. **Documentation** (genie_space) - Technical documentation
-7. **DevOps** (genie_space) - Git operations and CI/CD
+7. **DevOps** (genie_space) - Git/CI-CD GUIDANCE ONLY (no execution)
+8. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`) - EXECUTES workspace changes (git commits, file writes, SQL)
 
-## Notebooks
+**Supervisor Endpoint**: `mas-56389669-endpoint` (READY)
+
+### Anti-Routing Rules
+
+1. KPI questions → **Analyst only** (never DevOps or Documentation)
+2. Git execution → **Workspace-Actions** (DevOps is guidance only)
+3. Architecture design → **Architect** (not Data Engineer)
+4. Code implementation → **Data Engineer** (not Architect)
+5. Domain definitions → **Domain Expert** (not Analyst)
+6. DevOps → **Guidance only** (cannot execute Git operations)
+
+## Repository Structure
+
+```
+pc-insurance-medallion/
+├── pipelines/
+│   ├── Bronze_Pipeline.py          # Data generation & ingestion (5 Bronze tables)
+│   ├── Silver_Pipeline_Metadata.py # SCD2, PII masking, DQ checks (7 Silver tables)
+│   ├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
+│   └── Orchestrator.py             # Master pipeline orchestrator
+├── agents/
+│   ├── Architect_Agent.py           # MLflow agent for architecture design
+│   ├── Data_Engineer_Agent.py       # MLflow agent for pipeline code
+│   ├── DevOps_Agent.py             # DevOps agent (MLflow)
+│   ├── Domain_Expert_Agent.py      # UC volume domain expert setup
+│   ├── Domain_Expert_Setup.py       # UC volume with P&C reference docs
+│   ├── Analyst_Genie_Agent.py       # Analyst agent setup
+│   ├── Analyst_Genie_Setup.py       # Genie Space over Gold tables
+│   └── Supervisor_Agent_Setup.py    # Multi-agent orchestration setup
+├── app/
+│   ├── app.py                      # MCP server (pc-insurance-workspace-actions)
+│   ├── app.yaml                    # Databricks App config
+│   └── requirements.txt            # Python dependencies
+├── execution/
+│   ├── orchestrator.py             # MCP server action orchestration
+│   └── plan_executor.py            # MCP server action execution
+├── sql/
+│   ├── 01_catalog_schemas.sql      # Catalog and schema creation
+│   ├── 02_bronze_tables.sql        # Bronze table DDL
+│   ├── 03_silver_transformation_config.sql  # Silver transformation metadata
+│   ├── 04_gold_tables.sql          # Gold table DDL
+│   └── 05_gold_metric_config.sql   # Gold metric configuration
+├── utils/
+│   └── common_utils.py             # Shared utility functions
+├── docs/
+│   ├── ARCHITECTURE.md             # Architecture documentation
+│   ├── DATA_DICTIONARY.md          # Column-level data dictionary
+│   ├── DEPLOYMENT.md               # Deployment guide
+│   ├── Git_Automation_Guide.md     # Git automation via MCP app
+│   ├── InsuranceModel_Architecture_Guide.md  # End-to-end architecture guide
+│   └── RUNBOOK.md                  # Operations runbook
+├── README.md                        # This file
+├── Getting_Started.md               # Newcomer guide
+├── databricks.yml                   # DAB bundle config
+├── pyproject.toml                  # Python project config
+└── .gitignore
+```
 
 ### Active Pipelines
-- `Bronze_Pipeline` - Metadata-driven Auto Loader ingestion (INITIAL + INCREMENTAL)
-- `Silver_Pipeline_Metadata` - ⭐ **ACTIVE** Metadata-driven Silver pipeline (config-driven SCD2/FACT/DEDUP)
-- `Gold_Pipeline` - Metadata-driven KPI aggregations and audit
-- `Orchestrator` - Master pipeline orchestrator (updated to use metadata-driven Silver)
+- `pipelines/Bronze_Pipeline.py` - Metadata-driven Auto Loader ingestion (INITIAL + INCREMENTAL)
+- `pipelines/Silver_Pipeline_Metadata.py` - ⭐ **ACTIVE** Metadata-driven Silver pipeline (config-driven SCD2/FACT/DEDUP)
+- `pipelines/Gold_Pipeline.py` - Metadata-driven KPI aggregations and audit
+- `pipelines/Orchestrator.py` - Master pipeline orchestrator (updated to use metadata-driven Silver)
 
 ### Agent Setup
-- `Architect_Agent` - MLflow agent for architecture design
-- `Data_Engineer_Agent` - MLflow agent for pipeline code
-- `Domain_Expert_Setup` - UC volume with P&C reference docs
-- `Analyst_Genie_Setup` - Genie Space over Gold tables
-- `Supervisor_Agent_Setup` - Multi-agent orchestration
+- `agents/Architect_Agent.py` - MLflow agent for architecture design
+- `agents/Data_Engineer_Agent.py` - MLflow agent for pipeline code
+- `agents/DevOps_Agent.py` - DevOps agent (MLflow)
+- `agents/Domain_Expert_Setup.py` - UC volume with P&C reference docs
+- `agents/Analyst_Genie_Setup.py` - Genie Space over Gold tables
+- `agents/Supervisor_Agent_Setup.py` - Multi-agent orchestration
+
+### MCP App
+- `app/app.py` - `pc-insurance-workspace-actions` MCP server (git commits, file writes, SQL execution)
 
 ### Documentation
 - `README.md` - This file
-- `CLEANUP_SUMMARY.md` - Recent cleanup documentation
-- `CLEANUP_FINAL_REPORT.txt` - Detailed cleanup report
+- `Getting_Started.md` - Newcomer guide
+- `docs/ARCHITECTURE.md` - Architecture documentation
+- `docs/DATA_DICTIONARY.md` - Column-level data dictionary
+- `docs/DEPLOYMENT.md` - Deployment guide
+- `docs/RUNBOOK.md` - Operations runbook
 
 ## SQL DDL
 
 - `sql/01_catalog_schemas.sql` - Catalog and schema creation
 - `sql/02_bronze_tables.sql` - Bronze table DDL
+- `sql/03_silver_transformation_config.sql` - Silver transformation metadata configuration
 - `sql/04_gold_tables.sql` - Gold table DDL
+- `sql/05_gold_metric_config.sql` - Gold metric configuration
 
-**Note on sql/03_silver_tables.sql:**
-Silver layer tables are created dynamically by `Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. Therefore, `sql/03_silver_tables.sql` is intentionally absent. The metadata-driven approach allows Silver tables to be defined and modified through configuration rather than static DDL scripts.
+**Note on Silver table DDL:**
+Silver layer tables are created dynamically by `pipelines/Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table; it does not contain static Silver table DDL. The metadata-driven approach allows Silver tables to be defined and modified through configuration rather than static DDL scripts.
 
 ## Deploying to Another Environment
 
@@ -291,18 +358,10 @@ workspace credentials.
 
 ## Architecture Documentation
 
-The newcomer-focused end-to-end architecture guide is available in both source
-and PDF form:
+The newcomer-focused end-to-end architecture guide is available in Markdown:
 
 - `docs/InsuranceModel_Architecture_Guide.md`
-- `docs/InsuranceModel_Architecture_Guide.pdf`
-
-To rebuild the PDF after editing the Markdown source:
-
-```bash
-uv pip install --python .venv/bin/python reportlab
-.venv/bin/python tools/build_architecture_pdf.py
-```
+- `docs/ARCHITECTURE.md` — Technical architecture reference
 
 ## KPI Formulas
 
@@ -321,43 +380,32 @@ uv pip install --python .venv/bin/python reportlab
 
 1. **Setup Unity Catalog**: Run `sql/01_catalog_schemas.sql`
 2. **Create Bronze Tables**: Run `sql/02_bronze_tables.sql`
-3. **Create Gold Tables**: Run `sql/04_gold_tables.sql`
-4. **Run Bronze Pipeline**: Execute `Bronze_Pipeline` with `load_type=INITIAL`
-5. **Run Silver Pipeline**: Execute `Silver_Pipeline_Metadata` with `load_type=INITIAL`
-6. **Run Gold Pipeline**: Execute `Gold_Pipeline`
-7. **Setup Agents**: Run agent setup notebooks
-8. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
+3. **Configure Silver Transformations**: Run `sql/03_silver_transformation_config.sql`
+4. **Create Gold Tables**: Run `sql/04_gold_tables.sql` and `sql/05_gold_metric_config.sql`
+5. **Run Bronze Pipeline**: Execute `pipelines/Bronze_Pipeline.py` with `load_type=INITIAL`
+6. **Run Silver Pipeline**: Execute `pipelines/Silver_Pipeline_Metadata.py` with `load_type=INITIAL`
+7. **Run Gold Pipeline**: Execute `pipelines/Gold_Pipeline.py`
+8. **Setup Agents**: Run agent setup notebooks in `agents/`
+9. **Deploy MCP App**: Deploy `app/` as `pc-insurance-workspace-actions`
+10. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
 
 
-## Git Automation Workflow
+## Git Automation via MCP App
 
-The project includes an automated Git workflow that commits and pushes changes after successful pipeline execution and validation.
+The `pc-insurance-workspace-actions` MCP app (`app/app.py`) handles git commits, file writes, and SQL execution. It replaces the former `Git_Automation.py` notebook.
 
 ### Features
 
-- ✅ **Automatic Commit**: Changes are committed after validation success
+- ✅ **Subprocess Git CLI**: Uses `git add`, `git commit`, `git push` via subprocess (robust, no SDK dependency)
+- ✅ **Automatic Commit**: Changes committed after validation success
 - ✅ **Smart Push**: Retry logic handles network issues
 - ✅ **Health Checks**: Validates repository state before operations
 - ✅ **Change Detection**: Only commits when changes are detected
-- ✅ **Comprehensive Logging**: Detailed execution logs and error messages
+- ✅ **MCP Integration**: Exposed as tool to Supervisor Agent
 
 ### Usage
 
-The Git automation is integrated into the Orchestrator and runs automatically after pipeline completion:
-
-```python
-# Automatically called at the end of Orchestrator.py
-result = dbutils.notebook.run("./Git_Automation", timeout_seconds=300)
-```
-
-### Configuration
-
-Edit `Git_Automation.py` to customize:
-
-- Repository path
-- Retry attempts (default: 3)
-- Retry delay (default: 5 seconds)
-- Commit message format
+The MCP app runs as a Databricks App and is registered as the 8th tool in the Supervisor Agent. The Supervisor routes git/file/SQL execution requests to it via MCP.
 
 ### Documentation
 
