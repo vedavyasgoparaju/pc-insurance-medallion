@@ -367,19 +367,33 @@ pc_insurance/
 
 ### Job Configuration
 
-**Job Name**: `PC_Insurance_MultiAgent_Pipeline`  
-**Job ID**: `820361677269451`  
-**Schedule**: Daily at 2:00 AM UTC
+The project uses 2 jobs with distinct purposes:
+
+| Job | Name | ID | Purpose |
+|---|---|---|---|
+| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only (run once): MLflow models, serving endpoints, Genie Spaces, Knowledge Assistant, Supervisor Agent |
+| 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold with `load_type` parameter (INITIAL or INCREMENTAL) |
+
+**Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app.
+
+### Data Pipeline Job (Job 2)
+
+**Job Name**: `PC_Insurance_Data_Pipeline`
+**Job ID**: `894776717783668`
+**Schedule**: Optional (configure for daily incremental loads at 2:00 AM UTC)
 
 **Tasks**:
 1. **Bronze_Pipeline** (15 min) — Ingest data, write to Bronze tables, no dependencies
 2. **Silver_Pipeline_Metadata** (30 min) — Depends on Bronze. Read metadata config, execute transformations, apply SCD2, write audit logs, run reconciliation
 3. **Gold_Pipeline** (15 min) — Depends on Silver. Read metric config, execute aggregations, calculate business metrics, write audit logs, track DQ scores
 
-### Orchestrator
+**Load Types**: `INITIAL` (first-time full load) or `INCREMENTAL` (default, for scheduled runs)
 
-**Notebook**: `pipelines/Orchestrator.py`
-**Execution Framework**: `execution/orchestrator.py`, `execution/plan_executor.py`
+### On-Demand Execution via Supervisor Agent
+
+The Supervisor Agent can trigger pipeline notebooks on-demand through the MCP app's `run_notebook` tool. No separate orchestrator job is needed -- the Supervisor Agent + MCP app provide direct workspace execution capabilities.
+
+**Notebook**: `pipelines/Orchestrator.py` (optional helper for manual multi-layer runs)
 
 ---
 
