@@ -1,0 +1,38 @@
+# This is a Declarative Automation Bundle definition for InsuranceModel.
+# The Databricks extension requires databricks.yml configuration file.
+# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+
+bundle:
+  name: InsuranceModel
+
+include:
+  - resources/*.yml
+
+variables:
+  sql_warehouse_id:
+    default: 670b9d31fd290bb2
+  supervisor_endpoint:
+    default: mas-0bcacd94-endpoint
+  workspace_root:
+    default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel
+  allowed_roots:
+    default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel,/Users/vedavyas.goparaju@gmail.com/Supervisor_Agent_Setup,/Repos/vedavyas.goparaju/pc-insurance-medallion
+  repo_path:
+    default: /Repos/vedavyas.goparaju/pc-insurance-medallion
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-ec4d2e3d-58c3.cloud.databricks.com
+
+  staging:
+    mode: production
+    workspace:
+      profile: staging
+
+  prod:
+    mode: production
+    workspace:
+      profile: prod

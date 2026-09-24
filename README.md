@@ -2,15 +2,17 @@
 
 A multi-layered data platform for Property & Casualty Insurance built on Databricks, featuring Bronze/Silver/Gold pipelines, data quality functions, and a 7-agent multi-agent system.
 
-## What's New: Metadata-Driven Bronze + Silver Layers
+## What's New: Metadata-Driven Bronze, Silver + Gold Layers
 
-Both Bronze and Silver layers now use a **metadata-driven approach** with:
+Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Config tables** defining all sources/transformations, schemas, and load order (no hardcoding)
 - **Staging tables** as intermediate landing zone with `_load_id` traceability
 - **Load audit tables** tracking every load execution (timing, counts, status)
 - **Reconciliation tables** validating source-to-target row counts at every interval
 - **Auto Loader** for scalable CSV ingestion from UC Volume (Bronze)
 - **SCD2, FACT, and DEDUP transformation types** with PII masking (Silver)
+- **Gold metric configuration** defining KPI sources, dimensions, formulas, grain, and refresh order
+- **Gold load audit** tracking every configured KPI refresh
 - **Both INITIAL and INCREMENTAL load** patterns supported
 
 ## Recent Changes (2026-09-24)
@@ -39,6 +41,8 @@ Both Bronze and Silver layers now use a **metadata-driven approach** with:
 | silver_transformation_config | Silver | Config-driven transformation definitions (source, target, SCD2 cols, PII rules, load order) |
 | silver_load_audit | Silver | Every Silver load tracked (SCD2 ops, row counts, status) |
 | silver_reconciliation | Silver | Bronze-to-Silver row count validation (MATCH/MISMATCH) |
+| gold_metric_config | Gold | Config-driven KPI definitions, formulas, sources, and refresh order |
+| gold_load_audit | Gold | Every Gold metric refresh tracked with source and target counts |
 
 ### Staging Tables (bronze schema)
 
@@ -95,6 +99,9 @@ All Bronze tables have `source_system` and `ingestion_timestamp` metadata column
 | premium_growth | 24 | Written/earned premium, growth rate |
 | exposure_summary | 82 | Active policies, coverage limits |
 | uw_dashboard_summary | 24 | Executive dashboard (all KPIs) |
+
+Gold outputs are selected from active rows in `gold_metric_config`; the pipeline
+does not create a new hardcoded output path for each metric.
 
 ## Bronze Pipeline: Metadata-Driven Flow
 
@@ -237,7 +244,7 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
 ### Active Pipelines
 - `Bronze_Pipeline` - Metadata-driven Auto Loader ingestion (INITIAL + INCREMENTAL)
 - `Silver_Pipeline_Metadata` - ⭐ **ACTIVE** Metadata-driven Silver pipeline (config-driven SCD2/FACT/DEDUP)
-- `Gold_Pipeline` - KPI aggregations
+- `Gold_Pipeline` - Metadata-driven KPI aggregations and audit
 - `Orchestrator` - Master pipeline orchestrator (updated to use metadata-driven Silver)
 
 ### Agent Setup
@@ -257,6 +264,42 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 subagents:
 - `sql/01_catalog_schemas.sql` - Catalog and schema creation
 - `sql/02_bronze_tables.sql` - Bronze table DDL
 - `sql/04_gold_tables.sql` - Gold table DDL
+
+## Deploying to Another Environment
+
+The same Git commit can be deployed to `dev`, `staging`, or `prod`.
+
+1. Configure Databricks CLI profiles named `staging` and `prod` for the target workspaces.
+2. Bootstrap the target catalog, schemas, tables, agent resources, and permissions.
+3. Deploy the bundle with environment-specific values:
+
+```bash
+databricks bundle deploy -t staging \
+  --var sql_warehouse_id=<staging-warehouse-id> \
+  --var supervisor_endpoint=<staging-supervisor-endpoint> \
+  --var workspace_root=/Users/<target-user>/InsuranceModel \
+  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
+  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
+```
+
+Use the same command with `-t prod` and production values for production. Hosts
+come from the configured Databricks CLI profiles; code does not contain target
+workspace credentials.
+
+## Architecture Documentation
+
+The newcomer-focused end-to-end architecture guide is available in both source
+and PDF form:
+
+- `docs/InsuranceModel_Architecture_Guide.md`
+- `docs/InsuranceModel_Architecture_Guide.pdf`
+
+To rebuild the PDF after editing the Markdown source:
+
+```bash
+uv pip install --python .venv/bin/python reportlab
+.venv/bin/python tools/build_architecture_pdf.py
+```
 
 ## KPI Formulas
 
