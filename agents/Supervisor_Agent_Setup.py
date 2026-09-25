@@ -224,23 +224,28 @@ except Exception as e:
 print(f"\nRegistering {len(TOOLS_CONFIG)} tools...")
 success_count = 0
 for tool_id, tool_type, spec, description in TOOLS_CONFIG:
-    if tool_id in existing_tool_ids:
-        print(f"  ✓ {tool_id} (already registered)")
-        success_count += 1
-        continue
-    
     tool_body = {
         "tool_type": tool_type,
         "description": description,
         **spec,
     }
     
-    try:
-        api_request("POST", f"/{supervisor_id}/tools?tool_id={tool_id}", tool_body)
-        print(f"  ✓ {tool_id} (registered)")
+    if tool_id in existing_tool_ids:
+        # PATCH existing tool to keep description in sync
+        try:
+            update_body = {**tool_body, "tool_id": tool_id, "name": f"supervisor-agents/{supervisor_id}/tools/{tool_id}"}
+            api_request("PATCH", f"/{supervisor_id}/tools/{tool_id}?update_mask=description", update_body)
+            print(f"  ✓ {tool_id} (updated)")
+        except Exception as e:
+            print(f"  ✓ {tool_id} (exists, update note: {str(e)[:100]})")
         success_count += 1
-    except Exception as e:
-        print(f"  ✗ {tool_id}: {str(e)[:200]}")
+    else:
+        try:
+            api_request("POST", f"/{supervisor_id}/tools?tool_id={tool_id}", tool_body)
+            print(f"  ✓ {tool_id} (registered)")
+            success_count += 1
+        except Exception as e:
+            print(f"  ✗ {tool_id}: {str(e)[:200]}")
 
 print(f"\n✓ {success_count}/{len(TOOLS_CONFIG)} tools registered")
 
