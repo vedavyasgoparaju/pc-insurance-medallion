@@ -84,19 +84,21 @@ def record_gold_audit():
 
 premium_fact = spark.table(f"{CATALOG}.{SILVER}.premium_fact")
 claim_fact = spark.table(f"{CATALOG}.{SILVER}.claim_fact")
+date_dim = spark.table(f"{CATALOG}.{SILVER}.date_dim")
+customer_dim = spark.table(f"{CATALOG}.{SILVER}.customer_dim")
 
 # Aggregate earned premium by quarter and LOB
 earned_premium_agg = (
     premium_fact
-    .join(spark.table(f"{CATALOG}.{SILVER}.date_dim"), on="date_sk", how="left")
+    .join(date_dim, premium_fact["transaction_date_id"] == date_dim["date_id"], how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.lit("Quarterly").alias("period_type"),
         F.col("line_of_business")
     )
     .agg(
-        F.sum("earned_premium").alias("earned_premium"),
-        F.sum("written_premium").alias("written_premium"),
+        F.sum("net_premium").alias("earned_premium"),
+        F.sum("premium_amount").alias("written_premium"),
         F.sum("commission_amount").alias("expense_amount"),
         F.countDistinct("policy_id").alias("policy_count")
     )
@@ -106,17 +108,16 @@ earned_premium_agg = (
 incurred_loss_agg = (
     claim_fact
     .join(
-        spark.table(f"{CATALOG}.{SILVER}.date_dim")
-            .select(F.col("date_sk").alias("loss_date_sk"), F.col("year"), F.col("quarter")),
-        claim_fact["date_sk"] == F.col("loss_date_sk"), how="left"
+        date_dim.select(F.col("date_id").alias("loss_date_id_dim"), F.col("year"), F.col("quarter")),
+        claim_fact["loss_date_id"] == F.col("loss_date_id_dim"), how="left"
     )
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.col("line_of_business")
     )
     .agg(
-        F.sum("incurred_loss").alias("incurred_losses"),
-        F.sum("expense_amount").alias("claim_expense"),
+        F.sum("incurred_amount").alias("incurred_losses"),
+        F.sum("reserve_amount").alias("claim_expense"),
         F.countDistinct("claim_id").alias("claim_count")
     )
 )
@@ -158,7 +159,8 @@ gold_loss_ratio.orderBy(F.desc("reporting_period")).show(10, truncate=False)
 # Calculate exposure (policy count as proxy for exposure units)
 exposure_agg = (
     premium_fact
-    .join(spark.table(f"{CATALOG}.{SILVER}.date_dim"), on="date_sk", how="left")
+    .join(date_dim, premium_fact["transaction_date_id"] == date_dim["date_id"], how="left")
+    .join(customer_dim.select("customer_id", "state"), on="customer_id", how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.lit("Quarterly").alias("period_type"),
@@ -167,7 +169,7 @@ exposure_agg = (
     )
     .agg(
         F.countDistinct("policy_id").alias("exposure_units"),
-        F.sum("earned_premium").alias("total_earned_premium")
+        F.sum("net_premium").alias("total_earned_premium")
     )
 )
 
@@ -175,10 +177,10 @@ exposure_agg = (
 claim_freq_agg = (
     claim_fact
     .join(
-        spark.table(f"{CATALOG}.{SILVER}.date_dim")
-            .select(F.col("date_sk").alias("claim_date_sk"), F.col("year"), F.col("quarter")),
-        claim_fact["date_sk"] == F.col("claim_date_sk"), how="left"
+        date_dim.select(F.col("date_id").alias("claim_date_id_dim"), F.col("year"), F.col("quarter")),
+        claim_fact["loss_date_id"] == F.col("claim_date_id_dim"), how="left"
     )
+    .join(customer_dim.select("customer_id", "state"), on="customer_id", how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.col("line_of_business"),
@@ -186,9 +188,9 @@ claim_freq_agg = (
     )
     .agg(
         F.countDistinct("claim_id").alias("claim_count"),
-        F.sum("incurred_loss").alias("incurred_losses"),
-        F.avg("paid_loss").alias("avg_paid_loss"),
-        F.avg("reserved_amount").alias("avg_reserved")
+        F.sum("incurred_amount").alias("incurred_losses"),
+        F.avg("paid_amount").alias("avg_paid_loss"),
+        F.avg("reserve_amount").alias("avg_reserved")
     )
 )
 
@@ -236,14 +238,14 @@ retention_data = (
         F.lit("Quarterly").alias("period_type"),
         F.col("agent_id"),
         F.col("agent_name"),
-        F.col("agency_name")
+        F.col("agent_name").alias("agency_name")
     )
     .agg(
         F.count("*").alias("total_policies"),
-        F.sum(F.when(F.col("policy_status") == "Active", 1).otherwise(0)).alias("active_policies"),
-        F.sum(F.when(F.col("policy_status") == "Cancelled", 1).otherwise(0)).alias("cancelled_policies"),
-        F.sum(F.when(F.col("endorsement_count") == 0, 1).otherwise(0)).alias("new_business_policies"),
-        F.sum("premium_amount").alias("total_written_premium")
+        F.sum(F.when(F.col("status") == "Active", 1).otherwise(0)).alias("active_policies"),
+        F.sum(F.when(F.col("status") == "Cancelled", 1).otherwise(0)).alias("cancelled_policies"),
+        F.sum(F.when(F.col("status") == "Active", 1).otherwise(0)).alias("new_business_policies"),
+        F.sum("coverage_amount").alias("total_written_premium")
     )
     .withColumn("renewed_policies", F.col("active_policies") - F.col("new_business_policies"))
     .withColumn("retention_rate",
@@ -275,14 +277,14 @@ print(f"✓ Gold retention_by_agent loaded: {retention_data.count()} records")
 
 gold_premium_growth = (
     premium_fact
-    .join(spark.table(f"{CATALOG}.{SILVER}.date_dim"), on="date_sk", how="left")
+    .join(date_dim, premium_fact["transaction_date_id"] == date_dim["date_id"], how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.lit("Quarterly").alias("period_type"),
         F.col("line_of_business"),
         F.col("transaction_type")
     )
-    .agg(F.sum("written_premium").alias("type_premium"))
+    .agg(F.sum("premium_amount").alias("type_premium"))
     .groupBy("reporting_period", "period_type", "line_of_business")
     .pivot("transaction_type")
     .agg(F.sum("type_premium"))
@@ -327,6 +329,7 @@ gold_exposure = (
     policy_dim
     .join(date_dim_for_policy,
           policy_dim["effective_date"] == date_dim_for_policy["full_date"], how="left")
+    .join(customer_dim.select("customer_id", "state"), on="customer_id", how="left")
     .groupBy(
         F.concat_ws("-Q", F.col("year"), F.col("quarter")).alias("reporting_period"),
         F.lit("Quarterly").alias("period_type"),
@@ -335,11 +338,11 @@ gold_exposure = (
     )
     .agg(
         F.count("*").alias("total_policies"),
-        F.sum(F.when(F.col("policy_status") == "Active", 1).otherwise(0)).alias("active_policies"),
-        F.sum(F.when(F.col("policy_status") == "Cancelled", 1).otherwise(0)).alias("cancelled_policies"),
-        F.sum("coverage_limit").alias("total_coverage_limit"),
-        F.avg("premium_amount").alias("avg_premium_per_policy"),
-        F.sum(F.when(F.col("policy_status") == "Active", 1).otherwise(0)).alias("total_earned_exposure")
+        F.sum(F.when(F.col("status") == "Active", 1).otherwise(0)).alias("active_policies"),
+        F.sum(F.when(F.col("status") == "Cancelled", 1).otherwise(0)).alias("cancelled_policies"),
+        F.sum("coverage_amount").alias("total_coverage_limit"),
+        F.avg("coverage_amount").alias("avg_premium_per_policy"),
+        F.sum(F.when(F.col("status") == "Active", 1).otherwise(0)).alias("total_earned_exposure")
     )
     .withColumn("loaded_at", now)
 )
