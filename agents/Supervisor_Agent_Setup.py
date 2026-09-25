@@ -47,16 +47,11 @@ from databricks.sdk import WorkspaceClient
 w = WorkspaceClient()
 host = w.config.host
 
-TOKEN = os.environ.get("DATABRICKS_TOKEN", "")
-if not TOKEN:
-    import subprocess
-    result = subprocess.run(["databricks", "auth", "token"], capture_output=True, text=True, timeout=30)
-    if result.returncode == 0:
-        TOKEN = json.loads(result.stdout).get("access_token", "")
-
-HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+# Get auth headers from SDK (works on job clusters, serverless, and local)
+auth_headers = w.config.authenticate()
+HEADERS = {**auth_headers, "Content-Type": "application/json"}
 print(f"Workspace: {host}")
-print(f"Token available: {bool(TOKEN)}")
+print(f"Auth headers: {list(auth_headers.keys())}")
 
 # ============================================
 # Configuration
