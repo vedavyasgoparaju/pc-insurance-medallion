@@ -12,7 +12,7 @@ variables:
   sql_warehouse_id:
     default: 670b9d31fd290bb2
   supervisor_endpoint:
-    default: mas-56389669-endpoint
+    default: mas-05a49b97-endpoint
   workspace_root:
     default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel
   allowed_roots:

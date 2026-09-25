@@ -1146,7 +1146,7 @@ When deploying to another environment via DAB, update these variables in `databr
 | Variable | Description | Example Value |
 |---|---|---|
 | `sql_warehouse_id` | SQL warehouse ID for MCP app statement execution | `670b9d31fd290bb2` |
-| `supervisor_endpoint` | Supervisor Agent serving endpoint name | `mas-56389669-endpoint` |
+| `supervisor_endpoint` | Supervisor Agent serving endpoint name | `mas-05a49b97-endpoint` |
 | `workspace_root` | Workspace root path for the supervisor | `/Users/<your-email>/InsuranceModel` |
 | `allowed_roots` | Comma-separated allowed root paths | `/Users/<your-email>/InsuranceModel,/Repos/<your-user>/pc-insurance-medallion` |
 | `repo_path` | Databricks Git folder path | `/Repos/<your-user>/pc-insurance-medallion` |

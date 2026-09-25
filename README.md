@@ -86,7 +86,7 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 8 tools (7 su
 7. **DevOps** (genie_space) - Git/CI-CD GUIDANCE ONLY (no execution)
 8. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`) - EXECUTES workspace changes (git commits, file writes, SQL)
 
-**Supervisor Endpoint**: `mas-56389669-endpoint` (READY)
+**Supervisor Endpoint**: `mas-05a49b97-endpoint` (READY)
 
 ### Anti-Routing Rules
 

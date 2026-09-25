@@ -119,20 +119,29 @@ import os
 from mlflow.models import infer_signature
 
 # Define the agent as a callable Python class
-class ArchitectAgent:
+class ArchitectAgent(mlflow.pyfunc.PythonModel):
     """P&C Insurance Medallion Architecture Designer Agent"""
     
     def __init__(self):
         self.system_prompt = ARCHITECT_SYSTEM_PROMPT
     
-    def predict(self, inputs):
+    def predict(self, context, model_input=None):
         """Process architecture design questions"""
+        # Handle both old and new MLflow PythonModel signatures
+        if model_input is None:
+            # Old MLflow calls predict(model_input) without context
+            model_input = context
+            context = None
+        
         # In production, this would call an LLM with the system prompt
         # For now, return a structured response
-        if isinstance(inputs, dict):
-            question = inputs.get("question", inputs.get("query", ""))
+        if isinstance(model_input, dict):
+            question = model_input.get("question", model_input.get("query", ""))
+        elif hasattr(model_input, 'to_dict'):
+            row = model_input.iloc[0].to_dict() if len(model_input) > 0 else {}
+            question = row.get("question", row.get("query", ""))
         else:
-            question = str(inputs)
+            question = str(model_input)
         
         return {
             "agent": "Architect",
@@ -159,10 +168,23 @@ with mlflow.start_run(run_name="architect_agent_v1") as run:
     
     # Log the model
     agent = ArchitectAgent()
+    
+    # Create model signature (required for Unity Catalog registration)
+    import pandas as pd
+    sample_input = pd.DataFrame({"question": ["What is the Bronze layer design?"]})
+    sample_output = pd.DataFrame({
+        "agent": ["Architect"],
+        "role": ["Principal Data Architect"],
+        "question": ["What is the Bronze layer design?"],
+        "response": ["[Architect Agent] Ready to design Medallion architecture for: What is the Bronze layer design?"],
+    })
+    signature = infer_signature(sample_input, sample_output)
+    
     mlflow.pyfunc.log_model(
         artifact_path="architect_agent",
         python_model=agent,
-        registered_model_name="pc_architect_agent",
+        registered_model_name="workspace.default.pc_architect_agent",
+        signature=signature,
     )
     
     print(f"Architect Agent logged to MLflow: {run.info.run_id}")
@@ -179,11 +201,13 @@ with mlflow.start_run(run_name="architect_agent_v1") as run:
 # Deploy Architect Agent as Serving Endpoint
 # ============================================
 
-from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedModelInput, AutoScaleConfig
+from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedModelInput
 
-# Get the latest model version
-model_version = w.model_versions.get_latest_versions(name="pc_architect_agent")
-latest_version = max([mv.version for mv in model_version])
+# Get the latest model version via MLflow client
+import mlflow
+client = mlflow.tracking.MlflowClient()
+latest_versions = client.search_model_versions("name='workspace.default.pc_architect_agent'")
+latest_version = max(int(mv.version) for mv in latest_versions)
 model_uri = f"models:/pc_architect_agent/{latest_version}"
 
 print(f"Deploying model: {model_uri}")
@@ -196,14 +220,14 @@ try:
         config=EndpointCoreConfigInput(
             served_models=[
                 ServedModelInput(
-                    model_name="pc_architect_agent",
+                    model_name="workspace.default.pc_architect_agent",
                     model_version=latest_version,
                     workload_size="Small",
                     scale_to_zero_enabled=True,
                     environment_vars={},
                 )
             ],
-            traffic_config={"routes": [{"served_model_name": "pc_architect_agent", "traffic_percentage": 100}]},
+            traffic_config={"routes": [{"served_model_name": "workspace.default.pc_architect_agent", "traffic_percentage": 100}]},
         )
     )
     print(f"✓ Creating serving endpoint: {endpoint_name}")

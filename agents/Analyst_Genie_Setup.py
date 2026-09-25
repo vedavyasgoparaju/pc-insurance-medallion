@@ -51,21 +51,22 @@ for table_name, description in gold_table_descriptions.items():
     print(f"✓ Commented: pc_insurance.gold.{table_name}")
 
 # Column-level comments for key KPI columns
-spark.sql("""
-    COMMENT ON COLUMN pc_insurance.gold.loss_ratio_by_lob.loss_ratio IS 'Loss Ratio = Incurred Losses / Earned Premium. Values 0 to 5.0. Below 0.60 is good, above 0.70 is concerning.'
-""")
-spark.sql("""
-    COMMENT ON COLUMN pc_insurance.gold.loss_ratio_by_lob.combined_ratio IS 'Combined Ratio = (Incurred Losses + Expenses) / Earned Premium. Below 1.0 (100%) means underwriting profit.'
-""")
-spark.sql("""
-    COMMENT ON COLUMN pc_insurance.gold.claim_frequency_severity.claim_frequency IS 'Claim Frequency = Claim Count / Exposure Units. Measures how often claims occur per policy.'
-""")
-spark.sql("""
-    COMMENT ON COLUMN pc_insurance.gold.claim_frequency_severity.claim_severity IS 'Claim Severity = Incurred Losses / Claim Count. Average cost per claim.'
-""")
-spark.sql("""
-    COMMENT ON COLUMN pc_insurance.gold.retention_by_agent.retention_rate IS 'Retention Rate = Renewed Policies / (Renewed + Cancelled). Target: >90% personal, >85% commercial.'
-""")
+# Wrap in try/except since not all columns may exist in all tables
+column_comments = [
+    ("pc_insurance.gold.loss_ratio_by_lob.loss_ratio", "Loss Ratio = Incurred Losses / Earned Premium. Values 0 to 5.0. Below 0.60 is good, above 0.70 is concerning."),
+    ("pc_insurance.gold.claim_frequency_severity.claim_frequency", "Claim Frequency = Claim Count / Exposure Units. Measures how often claims occur per policy."),
+    ("pc_insurance.gold.claim_frequency_severity.claim_severity", "Claim Severity = Incurred Losses / Claim Count. Average cost per claim."),
+    ("pc_insurance.gold.retention_by_agent.retention_rate", "Retention Rate = Renewed Policies / (Renewed + Cancelled). Target: >90% personal, >85% commercial."),
+]
+
+for full_col, comment_text in column_comments:
+    try:
+        spark.sql(f"""
+            COMMENT ON COLUMN {full_col} IS '{comment_text.replace("'", "''")}'
+        """)
+        print(f"  ✓ Commented: {full_col}")
+    except Exception as e:
+        print(f"  ⚠ Skipped: {full_col} - {str(e)[:100]}")
 
 print("\n✓ All Gold layer table and column comments added for Genie")
 

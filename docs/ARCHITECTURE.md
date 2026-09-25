@@ -174,7 +174,7 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 - ✅ Handle errors and fallback logic
 
 **Implementation**: `Supervisor_Agent.py`
-**Endpoint**: `mas-56389669-endpoint` (READY)
+**Endpoint**: `mas-05a49b97-endpoint` (READY)
 
 ### 2. Architect Agent
 
