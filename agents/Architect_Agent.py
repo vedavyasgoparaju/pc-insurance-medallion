@@ -117,7 +117,7 @@ print(f"Prompt length: {len(ARCHITECT_SYSTEM_PROMPT)} characters")
 
 import os
 from mlflow.models import infer_signature
-from mlflow.models.resources import DatabricksServingEndpointResource
+from mlflow.models.resources import DatabricksServingEndpoint
 
 # Define the agent as a callable Python class
 class ArchitectAgent(mlflow.pyfunc.PythonModel):
@@ -203,7 +203,7 @@ with mlflow.start_run(run_name="architect_agent_v1") as run:
         registered_model_name="workspace.default.pc_architect_agent",
         signature=signature,
         resources=[
-            DatabricksServingEndpointResource(endpoint_name="databricks-gpt-oss-120b")
+            DatabricksServingEndpoint(endpoint_name="databricks-gpt-oss-120b")
         ],
     )
     

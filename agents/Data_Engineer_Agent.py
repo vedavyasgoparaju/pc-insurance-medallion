@@ -140,7 +140,7 @@ print(f"Prompt length: {len(DE_SYSTEM_PROMPT)} characters")
 # ============================================
 
 from mlflow.models import infer_signature
-from mlflow.models.resources import DatabricksServingEndpointResource
+from mlflow.models.resources import DatabricksServingEndpoint
 
 class DataEngineerAgent(mlflow.pyfunc.PythonModel):
     """P&C Insurance Pipeline Code Generator Agent"""
@@ -220,7 +220,7 @@ with mlflow.start_run(run_name="data_engineer_agent_v1") as run:
         registered_model_name="workspace.default.pc_data_engineer_agent",
         signature=signature,
         resources=[
-            DatabricksServingEndpointResource(endpoint_name="databricks-gpt-oss-120b")
+            DatabricksServingEndpoint(endpoint_name="databricks-gpt-oss-120b")
         ],
     )
     
