@@ -133,22 +133,38 @@ class ArchitectAgent(mlflow.pyfunc.PythonModel):
             model_input = context
             context = None
         
-        # In production, this would call an LLM with the system prompt
-        # For now, return a structured response
+        # Call LLM with system prompt using Databricks Foundation Model API
+        import mlflow.deployments
+        
+        # Extract question from input
         if isinstance(model_input, dict):
             question = model_input.get("question", model_input.get("query", ""))
-        elif hasattr(model_input, 'to_dict'):
+        elif hasattr(model_input, 'iloc'):
             row = model_input.iloc[0].to_dict() if len(model_input) > 0 else {}
             question = row.get("question", row.get("query", ""))
         else:
             question = str(model_input)
         
+        # Call foundation model with system prompt
+        deploy_client = mlflow.deployments.get_deploy_client("databricks")
+        llm_response = deploy_client.predict(
+            endpoint="databricks-gpt-oss-120b",
+            inputs={
+                "messages": [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": question}
+                ],
+                "max_tokens": 2000,
+                "temperature": 0.3
+            }
+        )
+        answer = llm_response["choices"][0]["message"]["content"]
+        
         return {
             "agent": "Architect",
             "role": "Principal Data Architect",
             "question": question,
-            "system_prompt": self.system_prompt,
-            "response": f"[Architect Agent] Ready to design Medallion architecture for: {question}"
+            "response": answer
         }
 
 # Log the agent to MLflow
