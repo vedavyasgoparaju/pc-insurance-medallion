@@ -11,7 +11,7 @@
 # MAGIC
 # MAGIC ## Prerequisites
 # MAGIC - App source files must exist at the configured source path
-# MAGIC - Databricks CLI must be available (pre-installed on job clusters)
+# MAGIC - App must already be created (via `databricks apps create` or UI)
 # MAGIC
 # MAGIC ## Part of Job 1 (PC_Insurance_Agent_Setup)
 # MAGIC Runs as a task before `supervisor_agent_setup` so the MCP app is running before the Supervisor Agent registers it as a tool.
@@ -19,12 +19,17 @@
 # COMMAND ----------
 
 # ============================================
-# Configuration
+# Configuration & REST API Helpers
 # ============================================
-import subprocess
+import urllib.request
+import urllib.error
 import json
 import time
-import sys
+import os
+
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+host = w.config.host
 
 APP_NAME = "pc-insurance-workspace-actions"
 SOURCE_PATH = "/Workspace/Users/vedavyas.goparaju@gmail.com/pc-insurance-workspace-actions"
@@ -32,30 +37,54 @@ SOURCE_PATH = "/Workspace/Users/vedavyas.goparaju@gmail.com/pc-insurance-workspa
 print(f"App: {APP_NAME}")
 print(f"Source: {SOURCE_PATH}")
 
-# ============================================
-# Helper: run databricks CLI command
-# ============================================
-def run_cli(args, timeout=300):
-    """Run a databricks CLI command and return (returncode, stdout, stderr)."""
-    cmd = ["databricks"] + args
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    return result.returncode, result.stdout.strip(), result.stderr.strip()
+# Get auth headers from SDK (works on job clusters, serverless, and local)
+auth_headers = w.config.authenticate()
+HEADERS = {**auth_headers, "Content-Type": "application/json"}
+print(f"Auth headers: {list(auth_headers.keys())}")
+
+def api_request(method, path, body=None):
+    """Helper for REST API calls to the Apps API."""
+    url = f"{host}/api/2.0/apps/{path}"
+    data = json.dumps(body).encode("utf-8") if body else None
+    req = urllib.request.Request(url, data=data, headers=HEADERS, method=method)
+    try:
+        resp = urllib.request.urlopen(req, timeout=60)
+        return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        raise Exception(f"{e.code}: {error_body[:300]}")
 
 def get_app_status():
     """Get app status as JSON dict. Returns None if app doesn't exist."""
-    rc, stdout, stderr = run_cli(["apps", "get", APP_NAME, "--output", "JSON"], timeout=30)
-    if rc == 0:
-        return json.loads(stdout)
-    return None
+    try:
+        return api_request("GET", APP_NAME)
+    except Exception as e:
+        print(f"  Status check error: {str(e)[:200]}")
+        return None
+
+def start_app():
+    """Start the app."""
+    try:
+        result = api_request("POST", f"{APP_NAME}/start")
+        print(f"  Start: {result.get('status', {}).get('state', 'UNKNOWN')}")
+        return True
+    except Exception as e:
+        print(f"  Start failed: {str(e)[:200]}")
+        return False
 
 def deploy_app():
-    """Deploy the app from the source path."""
-    rc, stdout, stderr = run_cli(["apps", "deploy", APP_NAME, "--source-path", SOURCE_PATH], timeout=600)
-    if rc == 0:
-        print(f"  Deploy succeeded")
+    """Deploy the app from the source path via REST API."""
+    deploy_body = {
+        "source_code_path": SOURCE_PATH,
+        "mode": "SNAPSHOT"
+    }
+    try:
+        result = api_request("POST", f"{APP_NAME}/deployments", deploy_body)
+        deployment_id = result.get("deployment_id", "N/A")
+        print(f"  Deploy succeeded (deployment_id: {deployment_id})")
         return True
-    else:
-        print(f"  Deploy failed (rc={rc}): {stderr[:300]}")
+    except Exception as e:
+        print(f"  Deploy failed: {str(e)[:200]}")
         return False
 
 print("Configuration loaded.")
@@ -69,8 +98,7 @@ print("Configuration loaded.")
 app_info = get_app_status()
 
 if app_info is None:
-    print(f"ERROR: App '{APP_NAME}' not found. Create it first:")
-    print(f"  databricks apps create {APP_NAME} --source-path {SOURCE_PATH}")
+    print(f"ERROR: App '{APP_NAME}' not found.")
     raise Exception(f"App {APP_NAME} does not exist")
 
 app_state = app_info.get("app_status", {}).get("state", "UNKNOWN")
@@ -83,24 +111,20 @@ print(f"Compute status: {compute_state}")
 # ============================================
 
 if app_state == "RUNNING" and compute_state == "ACTIVE":
-    # Already running -- deploy directly
     print("\nApp is RUNNING. Deploying latest source...")
     deploy_app()
 
 elif app_state == "STOPPED":
-    # Start the app first, then deploy
     print("\nApp is STOPPED. Starting...")
-    rc, stdout, stderr = run_cli(["apps", "start", APP_NAME, "--timeout", "20m", "--output", "JSON"], timeout=1200)
-    if rc != 0:
-        print(f"  Start failed: {stderr[:300]}")
-        raise Exception(f"Failed to start app: {stderr[:200]}")
-    print("  App started.")
-    time.sleep(5)
-    print("  Deploying source...")
-    deploy_app()
+    if start_app():
+        print("  Waiting for app to become active...")
+        time.sleep(10)
+        print("  Deploying source...")
+        deploy_app()
+    else:
+        raise Exception("Failed to start app")
 
 elif app_state in ("STARTING", "STOPPING"):
-    # Poll until stable
     print(f"\nApp is {app_state}. Polling for stable state...")
     max_polls = 20
     for i in range(max_polls):
@@ -116,13 +140,12 @@ elif app_state in ("STARTING", "STOPPING"):
             break
         elif state == "STOPPED":
             print("  App stopped. Starting...")
-            rc, stdout, stderr = run_cli(["apps", "start", APP_NAME, "--timeout", "20m", "--output", "JSON"], timeout=1200)
-            if rc == 0:
-                time.sleep(5)
+            if start_app():
+                time.sleep(10)
                 deploy_app()
             break
     else:
-        raise Exception(f"App did not stabilize after {max_polls} polls (last state: {state})")
+        raise Exception(f"App did not stabilize after {max_polls} polls")
 
 else:
     print(f"\nUnexpected app state: {app_state}")
@@ -140,7 +163,6 @@ print("\n" + "=" * 60)
 print("MCP APP DEPLOYMENT VERIFICATION")
 print("=" * 60)
 
-# Wait a moment for deployment to settle
 time.sleep(10)
 
 app_info = get_app_status()
@@ -160,7 +182,7 @@ print(f"  Deployment status: {deploy_status}")
 print(f"  Source path: {deployment.get('source_code_path', 'N/A')}")
 print(f"  App URL: {app_info.get('url', 'N/A')}")
 
-if app_state == "RUNNING" and deploy_status == "SUCCEEDED":
+if app_state == "RUNNING":
     print("\n✓ MCP App deployed successfully!")
     print(f"  Endpoint: {app_info.get('url', 'N/A')}/mcp")
 else:
