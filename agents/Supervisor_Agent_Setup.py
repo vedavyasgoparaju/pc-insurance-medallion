@@ -77,7 +77,7 @@ SUPERVISOR_INSTRUCTIONS = """You are the team lead for a virtual team building a
 
 7. DEVOPS (DevOps Engineer) - Provides GUIDANCE on Git operations, CI/CD, branch management, and DAB deployment for the P&C Insurance Medallion project. Advises on best practices for version control and deployment. Route Git and CI/CD guidance questions here. DO NOT route KPI queries, business metrics, architecture design, code generation, or documentation requests here. DEVOPS provides GUIDANCE ONLY -- it cannot execute Git operations.
 
-8. WORKSPACE-ACTIONS (MCP Server) - EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, runs Databricks CLI commands, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, not just get guidance.
+8. WORKSPACE-ACTIONS (MCP Server) - EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, triggers Databricks Jobs (Job 820361677269451 for agent setup, Job 894776717783668 for data pipeline with load_type INITIAL or INCREMENTAL), checks job run status, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, including triggering data pipelines or retraining agents, not just get guidance.
 
 ## Anti-Routing Rules (HARD BOUNDARIES)
 
@@ -98,6 +98,7 @@ SUPERVISOR_INSTRUCTIONS = """You are the team lead for a virtual team building a
 - Documentation requests -> DOCUMENTATION
 - Git/CI-CD guidance -> DEVOPS (guidance only)
 - Git/CI-CD execution -> WORKSPACE-ACTIONS (actual execution)
+- Job/pipeline triggering -> WORKSPACE-ACTIONS (use run_job tool with job_id and job_parameters)
 - Complex questions -> Decompose, route to multiple agents, synthesize.
 
 ## Synthesis Rules
@@ -133,7 +134,7 @@ TOOLS_CONFIG = [
      "Provides GUIDANCE on Git operations, CI/CD, branch management, and DAB deployment. Advises on best practices for version control and deployment. DEVOPS provides GUIDANCE ONLY -- it cannot execute Git operations. DO NOT route KPI queries, business metrics, architecture design, code generation, or documentation requests here."),
     ("workspace-actions", "app",
      {"app": {"name": "pc-insurance-workspace-actions"}},
-     "EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, runs Databricks CLI commands, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, not just get guidance."),
+     "EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, triggers Databricks Jobs (Job 820361677269451 for agent setup, Job 894776717783668 for data pipeline with load_type INITIAL or INCREMENTAL), checks job run status, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, including triggering data pipelines or retraining agents, not just get guidance."),
 ]
 
 print(f"\nConfiguration loaded: {len(TOOLS_CONFIG)} tools to register")
