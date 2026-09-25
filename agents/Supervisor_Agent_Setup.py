@@ -16,386 +16,285 @@
 # MAGIC | Domain Expert | P&C Insurance SME | Senior | Knowledge Assistant | Answers insurance domain questions |
 # MAGIC | Analyst | Business Analyst | Mid | Genie Space | Queries Gold layer for KPIs and business metrics |
 # MAGIC | QA Validator | QA Engineer | Junior | UC Function | Runs data quality validation checks |
-# MAGIC | Intern | Data Analyst | Entry | Genie Space | Basic exploration, profiling, documentation |
+# MAGIC | Documentation | Technical Writer | Senior | Genie Space | Generates/updates technical documentation |
+# MAGIC | DevOps | DevOps Engineer | Senior | Genie Space | Git/CI-CD guidance only (cannot execute) |
+# MAGIC | Workspace-Actions | MCP Server | N/A | Databricks App | Executes workspace changes: file writes, SQL, git commits |
 # MAGIC
 # MAGIC ## Prerequisites
 # MAGIC 1. Run `Architect_Agent` notebook → creates `pc_architect_agent` serving endpoint
 # MAGIC 2. Run `Data_Engineer_Agent` notebook → creates `pc_data_engineer_agent` serving endpoint
-# MAGIC 3. Run `Domain_Expert_Setup` notebook → creates Knowledge Assistant `pc_domain_expert`
-# MAGIC 4. Run `Analyst_Genie_Setup` notebook → creates Genie Space `PC_Insurance_Analyst`
+# MAGIC 3. Run `Domain_Expert_Setup` notebook → creates UC volume `pc_insurance.reference.pc_domain_docs`
+# MAGIC 4. Run `Analyst_Genie_Setup` notebook → creates Genie Spaces (analyst, documentation, devops)
 # MAGIC 5. UC functions in `pc_insurance.dq` must exist
+# MAGIC 6. MCP app `pc-insurance-workspace-actions` must be running
+# MAGIC
+# MAGIC ## Idempotent
+# MAGIC This notebook is idempotent — it checks for an existing Supervisor Agent by display name and only creates if not found. Tools are registered only if not already present. Safe to re-run.
 
 # COMMAND ----------
 
-# DBTITLE 1,Setup & Configuration
+# DBTITLE 1,Setup & Configuration (REST API)
 # ============================================
 # Setup & Imports
 # ============================================
+import urllib.request
+import urllib.error
+import json
+import os
+import time
+
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.service.supervisoragents import (
-    SupervisorAgent, Tool, GenieSpace, KnowledgeAssistant,
-    UcFunction, Example
-)
-
 w = WorkspaceClient()
-print(f"Workspace: {w.config.host}")
+host = w.config.host
+
+TOKEN = os.environ.get("DATABRICKS_TOKEN", "")
+if not TOKEN:
+    import subprocess
+    result = subprocess.run(["databricks", "auth", "token"], capture_output=True, text=True, timeout=30)
+    if result.returncode == 0:
+        TOKEN = json.loads(result.stdout).get("access_token", "")
+
+HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+print(f"Workspace: {host}")
+print(f"Token available: {bool(TOKEN)}")
 
 # ============================================
-# Configuration - UPDATE THESE IDs
+# Configuration
 # ============================================
+SUPERVISOR_DISPLAY_NAME = "P&C Insurance Medallion Architecture Team"
+SUPERVISOR_DESCRIPTION = "A multi-agent team that designs, develops, and operates a Medallion architecture for Property & Casualty (P&C) Insurance. Routes questions to the right specialist: Architect for design, Data Engineer for code, Domain Expert for insurance knowledge, Analyst for KPIs, QA for validation, Documentation for technical writing, DevOps for Git/CI-CD guidance, and Workspace-Actions for executing workspace changes."
 
-# Replace with your actual IDs after running the prerequisite notebooks
-KNOWLEDGE_ASSISTANT_ID = "<replace-with-your-knowledge-assistant-id>"
-GENIE_SPACE_ANALYST_ID = "<replace-with-your-analyst-genie-space-id>"
-GENIE_SPACE_INTERN_ID = "<replace-with-your-intern-genie-space-id>"  # Optional: reuse analyst or create separate
-
-# Serving endpoint names (created by the agent notebooks)
-ARCHITECT_ENDPOINT = "pc_architect_agent"
-DATA_ENGINEER_ENDPOINT = "pc_data_engineer_agent"
-
-# UC function for DQ
-DQ_FUNCTION = "pc_insurance.dq.calculate_dq_score"
-
-print("Configuration loaded. Update the IDs above before running.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Create Supervisor Agent
-# ============================================
-# Create the Supervisor Agent
-# ============================================
-
-supervisor = SupervisorAgent(
-    display_name="P&C Insurance Medallion Architecture Team",
-    description="A multi-agent team that designs, develops, and operates a Medallion architecture for Property & Casualty (P&C) Insurance. Routes questions to the right specialist: Architect for design, Data Engineer for code, Domain Expert for insurance knowledge, Analyst for KPIs, QA for validation, and Intern for basic queries.",
-    instructions="""You are the team lead for a virtual team building a Medallion architecture for a Property & Casualty (P&C) Insurance use case on Databricks.
+SUPERVISOR_INSTRUCTIONS = """You are the team lead for a virtual team building a Medallion architecture for a Property & Casualty (P&C) Insurance use case on Databricks.
 
 ## Your Team Members
 
-1. **ARCHITECT** (Principal Data Architect) — Designs the overall Medallion architecture, defines Bronze/Silver/Gold layer schemas, data flow topology, and Unity Catalog governance. Route architecture and design questions here.
+1. ARCHITECT (Principal Data Architect) - Designs the overall Medallion architecture, defines Bronze/Silver/Gold layer schemas, data flow topology, and Unity Catalog governance. Route architecture and design questions here. DO NOT route implementation, KPI, or Git questions here.
 
-2. **DATA ENGINEER** (Senior Data Engineer) — Implements Bronze/Silver/Gold pipelines, writes Spark Declarative Pipeline (SDP) code, SQL transformations, and data quality expectations. Route code generation and pipeline implementation questions here.
+2. DATA ENGINEER (Senior Data Engineer) - Implements Bronze/Silver/Gold pipelines, writes Spark Declarative Pipeline (SDP) code, SQL transformations, and data quality expectations. Route code generation and pipeline implementation questions here. DO NOT route architecture design, business KPI queries, or Git operations here.
 
-3. **P&C DOMAIN EXPERT** (Insurance SME) — Answers questions about P&C insurance domain: policy lifecycle, claims processing, underwriting, reserving, loss ratios, combined ratios, frequency/severity, retention, and regulatory requirements. Route insurance domain questions here.
+3. P&C DOMAIN EXPERT (Insurance SME) - Answers questions about P&C insurance domain: policy lifecycle, claims processing, underwriting, reserving, loss ratios, combined ratios, frequency/severity, retention, and regulatory requirements. Route insurance domain questions here. DO NOT route KPI queries, code generation, or Git operations here.
 
-4. **ANALYST** (Business Analyst) — Answers business questions by querying Gold layer tables: loss ratios, combined ratios, claim frequency/severity, retention rates, premium growth, exposure summaries. Route KPI and business metric questions here.
+4. ANALYST (Business Analyst) - Answers business questions by querying Gold layer tables: loss ratios, combined ratios, claim frequency/severity, retention rates, premium growth, exposure summaries. Route KPI and business metric questions here. DO NOT route architecture, code generation, Git operations, or documentation requests here.
 
-5. **QA VALIDATOR** (QA Engineer) — Runs data quality validation checks on the data. Route data quality, validation, and testing questions here.
+5. QA VALIDATOR (QA Engineer) - Runs data quality validation checks on the data by calling the pc_insurance.dq.calculate_dq_score UC function. Validates premium amounts, claim statuses, policy existence, and loss ratios. Route data quality and validation questions here. DO NOT route architecture, code generation, or Git questions here.
 
-6. **INTERN** (Data Analyst) — Handles basic data exploration, profiling, row counts, and simple queries. Route simple documentation and profiling requests here.
+6. DOCUMENTATION (Technical Writer) - Generates and updates technical documentation for the P&C Insurance Medallion architecture: README files, architecture guides, data dictionaries, pipeline documentation. Route documentation requests here. DO NOT route KPI queries, code generation, or Git operations here.
+
+7. DEVOPS (DevOps Engineer) - Provides GUIDANCE on Git operations, CI/CD, branch management, and DAB deployment for the P&C Insurance Medallion project. Advises on best practices for version control and deployment. Route Git and CI/CD guidance questions here. DO NOT route KPI queries, business metrics, architecture design, code generation, or documentation requests here. DEVOPS provides GUIDANCE ONLY -- it cannot execute Git operations.
+
+8. WORKSPACE-ACTIONS (MCP Server) - EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, runs Databricks CLI commands, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, not just get guidance.
+
+## Anti-Routing Rules (HARD BOUNDARIES)
+
+1. DO NOT route KPI or business metric questions to DEVOPS. DevOps is for Git/CI-CD guidance only.
+2. DO NOT route KPI or business metric questions to DOCUMENTATION. Documentation is for technical writing only.
+3. DO NOT route Git execution requests to DEVOPS. Use WORKSPACE-ACTIONS for actual git commit/push. DEVOPS is guidance only.
+4. DO NOT route architecture design questions to DATA ENGINEER. Data Engineer implements code; Architect designs.
+5. DO NOT route code implementation questions to ARCHITECT. Architect designs; Data Engineer implements.
+6. DO NOT route insurance domain definition questions to ANALYST. Domain Expert explains concepts; Analyst queries actual metric values from Gold tables.
 
 ## Routing Rules
 
-When a user asks a question, decompose it and route to the appropriate agent(s):
-
-- Architecture and design questions → **ARCHITECT**
-  Examples: "Design the Bronze layer", "What schema should I use for claims?", "How should I structure Unity Catalog?"
-
-- Code and pipeline questions → **DATA ENGINEER**
-  Examples: "Write the Silver MERGE for SCD2", "Create DQ expectations", "Generate the Gold SQL"
-
-- Insurance domain questions → **P&C DOMAIN EXPERT**
-  Examples: "What is a loss ratio?", "How does reserving work?", "What are the P&C lines of business?"
-
-- KPI and business questions → **ANALYST**
-  Examples: "What is our loss ratio by LOB?", "Show claim frequency by state", "Which agents have the best retention?"
-
-- Data quality questions → **QA VALIDATOR**
-  Examples: "Check data quality on the policies table", "Validate claim statuses"
-
-- Simple queries → **INTERN**
-  Examples: "How many policies do we have?", "What columns are in the claims table?"
-
-- Complex questions that span multiple domains → Decompose and route to multiple agents, then synthesize the results into a single cohesive answer.
+- Architecture and design questions -> ARCHITECT
+- Code and pipeline questions -> DATA ENGINEER
+- Insurance domain questions -> P&C DOMAIN EXPERT
+- KPI and business questions -> ANALYST
+- Data quality questions -> QA VALIDATOR
+- Documentation requests -> DOCUMENTATION
+- Git/CI-CD guidance -> DEVOPS (guidance only)
+- Git/CI-CD execution -> WORKSPACE-ACTIONS (actual execution)
+- Complex questions -> Decompose, route to multiple agents, synthesize.
 
 ## Synthesis Rules
 
-When multiple agents contribute:
-1. Present the synthesized answer in a logical order (architecture first, then implementation, then domain context)
+1. Present in logical order (architecture first, then implementation, then domain context)
 2. Cite which agent provided each part
 3. Ensure consistency across agent responses
 4. Add a summary at the end if the response is long
-""",
-)
+"""
 
-created_supervisor = w.supervisor_agents.create_supervisor_agent(supervisor_agent=supervisor)
-supervisor_name = created_supervisor.name
-print(f"✓ Supervisor Agent created: {supervisor_name}")
-print(f"  Display Name: {created_supervisor.display_name}")
-
-# COMMAND ----------
-
-# DBTITLE 1,Register Architect Subagent
-# ============================================
-# Register Subagent 1: ARCHITECT (Serving Endpoint)
-# ============================================
-
-architect_tool = Tool(
-    tool_type="serving_endpoint",
-    description="Designs Medallion architecture for P&C insurance. Defines Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, and scalability patterns. Answers questions about architecture design, table schemas, and pipeline topology.",
-)
-
-# Note: serving_endpoint type uses a different spec format
-# The Tool spec for serving_endpoint requires the endpoint name
-architect_tool_dict = {
-    "tool_type": "serving_endpoint",
-    "description": "Designs Medallion architecture for P&C insurance. Defines Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, and scalability patterns. Answers questions about architecture design, table schemas, and pipeline topology.",
-}
-
-try:
-    created_architect = w.supervisor_agents.create_tool(
-        parent=supervisor_name,
-        tool=Tool(
-            tool_type="serving_endpoint",
-            description="Designs Medallion architecture for P&C insurance. Defines Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, and scalability patterns.",
-        ),
-        tool_id="architect",
-    )
-    print(f"✓ Architect tool registered: {created_architect.name}")
-except Exception as e:
-    print(f"Architect registration note: {e}")
-    print("The serving endpoint must exist before registering. Run Architect_Agent notebook first.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Register Data Engineer Subagent
-# ============================================
-# Register Subagent 2: DATA ENGINEER (Serving Endpoint)
-# ============================================
-
-try:
-    created_de = w.supervisor_agents.create_tool(
-        parent=supervisor_name,
-        tool=Tool(
-            tool_type="serving_endpoint",
-            description="Implements Bronze/Silver/Gold pipelines for P&C insurance data. Writes Spark Declarative Pipeline (SDP) code, SQL transformations, MERGE statements for SCD2, and data quality expectations. Generates Auto Loader code, PySpark transformations, and Delta Lake operations.",
-        ),
-        tool_id="data-engineer",
-    )
-    print(f"✓ Data Engineer tool registered: {created_de.name}")
-except Exception as e:
-    print(f"Data Engineer registration note: {e}")
-    print("The serving endpoint must exist before registering. Run Data_Engineer_Agent notebook first.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Register Domain Expert Subagent
-# ============================================
-# Register Subagent 3: P&C DOMAIN EXPERT (Knowledge Assistant)
-# ============================================
-
-if KNOWLEDGE_ASSISTANT_ID and KNOWLEDGE_ASSISTANT_ID != "<replace-with-your-knowledge-assistant-id>":
-    try:
-        created_domain = w.supervisor_agents.create_tool(
-            parent=supervisor_name,
-            tool=Tool(
-                tool_type="knowledge_assistant",
-                description="Answers questions about Property & Casualty insurance domain. Knows about policy lifecycle (quote/bind/issue/renew/cancel), claims processing (FNOL/investigation/reserve/settle), underwriting guidelines, loss ratios, combined ratios, frequency/severity, retention rates, reserving practices, NAIC regulatory requirements, and all P&C lines of business.",
-                knowledge_assistant=KnowledgeAssistant(knowledge_assistant_id=KNOWLEDGE_ASSISTANT_ID),
-            ),
-            tool_id="pc-domain-expert",
-        )
-        print(f"✓ Domain Expert tool registered: {created_domain.name}")
-    except Exception as e:
-        print(f"Domain Expert registration note: {e}")
-else:
-    print("⚠ Knowledge Assistant ID not set. Run Domain_Expert_Setup notebook first.")
-    print("  Then update KNOWLEDGE_ASSISTANT_ID in this notebook and re-run this cell.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Register Analyst Subagent
-# ============================================
-# Register Subagent 4: ANALYST (Genie Space)
-# ============================================
-
-if GENIE_SPACE_ANALYST_ID and GENIE_SPACE_ANALYST_ID != "<replace-with-your-analyst-genie-space-id>":
-    try:
-        created_analyst = w.supervisor_agents.create_tool(
-            parent=supervisor_name,
-            tool=Tool(
-                tool_type="genie_space",
-                description="Answers business questions about P&C insurance KPIs by querying Gold layer tables. Provides loss ratio, combined ratio, claim frequency/severity, retention rate, premium growth, exposure summary, and executive dashboard metrics. Use for questions like 'What is our loss ratio by LOB?' or 'Show me retention by agent.'",
-                genie_space=GenieSpace(id=GENIE_SPACE_ANALYST_ID),
-            ),
-            tool_id="analyst",
-        )
-        print(f"✓ Analyst tool registered: {created_analyst.name}")
-    except Exception as e:
-        print(f"Analyst registration note: {e}")
-else:
-    print("⚠ Genie Space ID not set. Run Analyst_Genie_Setup notebook first.")
-    print("  Then update GENIE_SPACE_ANALYST_ID in this notebook and re-run this cell.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Register QA Validator Subagent
-# ============================================
-# Register Subagent 5: QA VALIDATOR (UC Function)
-# ============================================
-
-try:
-    created_qa = w.supervisor_agents.create_tool(
-        parent=supervisor_name,
-        tool=Tool(
-            tool_type="uc_function",
-            description="Runs data quality validation checks on P&C insurance data. Validates premium amounts are positive, claim statuses are valid, loss ratios are within bounds, policy IDs are not null, and date ordering is correct. Use for data quality and validation questions.",
-            uc_function=UcFunction(name=DQ_FUNCTION),
-        ),
-        tool_id="qa-validator",
-    )
-    print(f"✓ QA Validator tool registered: {created_qa.name}")
-except Exception as e:
-    print(f"QA Validator registration note: {e}")
-    print("Ensure UC functions in pc_insurance.dq schema exist.")
-
-# COMMAND ----------
-
-# DBTITLE 1,Register Intern Subagent
-# ============================================
-# Register Subagent 6: INTERN (Genie Space)
-# ============================================
-# The Intern can reuse the Analyst Genie Space or have its own
-# For simplicity, we reuse the analyst Genie Space with a different description
-
-if GENIE_SPACE_INTERN_ID and GENIE_SPACE_INTERN_ID != "<replace-with-your-intern-genie-space-id>":
-    genie_id = GENIE_SPACE_INTERN_ID
-elif GENIE_SPACE_ANALYST_ID and GENIE_SPACE_ANALYST_ID != "<replace-with-your-analyst-genie-space-id>":
-    genie_id = GENIE_SPACE_ANALYST_ID  # reuse analyst space
-else:
-    genie_id = None
-
-if genie_id:
-    try:
-        created_intern = w.supervisor_agents.create_tool(
-            parent=supervisor_name,
-            tool=Tool(
-                tool_type="genie_space",
-                description="Handles basic data exploration, profiling, and documentation queries. Counts rows, profiles columns, checks data distributions across Bronze and Silver layers. Use for simple questions like 'How many policies do we have?' or 'What is the distribution of claim statuses?'",
-                genie_space=GenieSpace(id=genie_id),
-            ),
-            tool_id="intern",
-        )
-        print(f"✓ Intern tool registered: {created_intern.name}")
-    except Exception as e:
-        print(f"Intern registration note: {e}")
-else:
-    print("⚠ No Genie Space ID available for Intern. Skipping (optional).")
-
-# COMMAND ----------
-
-# DBTITLE 1,Add Quality Examples
-# ============================================
-# Add Quality Examples for Routing
-# ============================================
-
-examples = [
-    {
-        "question": "Design the Bronze layer for ingesting P&C policy data from our policy admin system",
-        "guidelines": [
-            "Route to the ARCHITECT agent for the schema design and ingestion approach",
-            "Also route to the P&C DOMAIN EXPERT for policy data domain knowledge",
-            "Synthesize both responses into a comprehensive Bronze layer design with table schemas"
-        ]
-    },
-    {
-        "question": "Write the Silver layer transformation for claims data with data quality checks",
-        "guidelines": [
-            "Route to the DATA ENGINEER for the transformation code (MERGE, dedup, SCD2)",
-            "Route to the QA VALIDATOR for data quality expectations",
-            "Combine into a complete Silver layer pipeline with DQ rules"
-        ]
-    },
-    {
-        "question": "What is our loss ratio by line of business for the latest quarter?",
-        "guidelines": [
-            "Route to the ANALYST agent which queries the Gold layer loss_ratio_by_lob table",
-            "Format the answer as a table with line_of_business and loss_ratio columns"
-        ]
-    },
-    {
-        "question": "What is a combined ratio and how is it calculated?",
-        "guidelines": [
-            "Route to the P&C DOMAIN EXPERT for the definition and formula",
-            "Provide the formula: Combined Ratio = (Incurred Losses + Expenses) / Earned Premium"
-        ]
-    },
-    {
-        "question": "How many claims do we have and what is the distribution of claim statuses?",
-        "guidelines": [
-            "Route to the INTERN agent for basic row count and status distribution",
-            "Present the results as a simple summary table"
-        ]
-    },
-    {
-        "question": "Design and implement the complete Gold layer for P&C insurance KPIs",
-        "guidelines": [
-            "Route to the ARCHITECT for the Gold layer design and KPI definitions",
-            "Route to the DATA ENGINEER for the SQL implementation code",
-            "Route to the P&C DOMAIN EXPERT for KPI formulas and industry benchmarks",
-            "Synthesize into a complete Gold layer design with code"
-        ]
-    },
+# Tool configuration: (tool_id, tool_type, spec_dict, description)
+TOOLS_CONFIG = [
+    ("architect", "serving_endpoint",
+     {"serving_endpoint": {"name": "pc_architect_agent"}},
+     "Designs the overall Medallion architecture for P&C insurance: Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, and scalability patterns. DO NOT route code implementation, KPI queries, or Git operations here."),
+    ("data-engineer", "serving_endpoint",
+     {"serving_endpoint": {"name": "pc_data_engineer_agent"}},
+     "Implements Bronze/Silver/Gold pipelines for P&C insurance: writes SDP code, SQL transformations, MERGE statements for SCD2, and data quality expectations. DO NOT route architecture design, KPI queries, or Git operations here."),
+    ("pc-domain-expert", "volume",
+     {"volume": {"name": "pc_insurance.reference.pc_domain_docs"}},
+     "Answers P&C insurance domain questions: policy lifecycle, claims processing, underwriting, reserving, loss ratios, combined ratios, frequency/severity, retention, and regulatory requirements. DO NOT route KPI queries, code generation, or Git operations here."),
+    ("qa-validator", "uc_function",
+     {"uc_function": {"name": "pc_insurance.dq.calculate_dq_score"}},
+     "Runs data quality validation checks on P&C insurance data by calling the pc_insurance.dq.calculate_dq_score UC function. DO NOT route architecture, code generation, or Git questions here."),
+    ("analyst", "genie_space",
+     {"genie_space": {"id": "01f1b6a93ad91b3d8e225bd409a14a44"}},
+     "Answers business KPI questions by querying Gold layer tables: loss ratios, combined ratios, claim frequency/severity, retention rates, premium growth, exposure summaries. DO NOT route architecture, code generation, Git operations, or documentation requests here."),
+    ("documentation", "genie_space",
+     {"genie_space": {"id": "01f1b6af258f1a9ca1e984ab82ef6bc7"}},
+     "Generates and updates technical documentation for the P&C Insurance Medallion architecture: README files, architecture guides, data dictionaries, pipeline documentation. DO NOT route KPI queries, code generation, or Git operations here."),
+    ("devops", "genie_space",
+     {"genie_space": {"id": "01f1b72df61b1fc3ac9dc984d402bdf0"}},
+     "Provides GUIDANCE on Git operations, CI/CD, branch management, and DAB deployment. Advises on best practices for version control and deployment. DEVOPS provides GUIDANCE ONLY -- it cannot execute Git operations. DO NOT route KPI queries, business metrics, architecture design, code generation, or documentation requests here."),
+    ("workspace-actions", "app",
+     {"app": {"name": "pc-insurance-workspace-actions"}},
+     "EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, runs Databricks CLI commands, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, not just get guidance."),
 ]
 
-for i, ex in enumerate(examples, 1):
-    try:
-        w.supervisor_agents.create_example(
-            parent=supervisor_name,
-            example=Example(
-                question=ex["question"],
-                guidelines=ex["guidelines"],
-            ),
-        )
-        print(f"✓ Example {i} added: {ex['question'][:60]}...")
-    except Exception as e:
-        print(f"Example {i} note: {e}")
+print(f"\nConfiguration loaded: {len(TOOLS_CONFIG)} tools to register")
+print(f"Supervisor: {SUPERVISOR_DISPLAY_NAME}")
 
-print(f"\n✓ Added {len(examples)} quality examples to the Supervisor Agent")
+# COMMAND ----------
+
+# DBTITLE 1,Create or Get Supervisor Agent
+# ============================================
+# Step 1: Create or Get Supervisor Agent (Idempotent)
+# ============================================
+
+def api_request(method, path, body=None):
+    """Helper for REST API calls to Supervisor Agents API."""
+    url = f"{host}/api/2.1/supervisor-agents{path}"
+    data = json.dumps(body).encode("utf-8") if body else None
+    req = urllib.request.Request(url, data=data, headers=HEADERS, method=method)
+    try:
+        resp = urllib.request.urlopen(req, timeout=60)
+        return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        raise Exception(f"{e.code}: {error_body[:300]}")
+
+# List existing Supervisor Agents to check if one already exists
+supervisor_name = None
+supervisor_id = None
+try:
+    result = api_request("GET", "")
+    existing_agents = result.get("supervisor_agents", [])
+    for agent in existing_agents:
+        if agent.get("display_name") == SUPERVISOR_DISPLAY_NAME:
+            supervisor_name = agent.get("name")
+            supervisor_id = agent.get("supervisor_agent_id")
+            print(f"✓ Found existing Supervisor Agent: {supervisor_name}")
+            break
+except Exception as e:
+    print(f"Note: Could not list agents: {e}")
+
+# Create new Supervisor Agent if not found
+if not supervisor_name:
+    print(f"\nCreating new Supervisor Agent: {SUPERVISOR_DISPLAY_NAME}...")
+    create_body = {
+        "display_name": SUPERVISOR_DISPLAY_NAME,
+        "description": SUPERVISOR_DESCRIPTION,
+        "instructions": SUPERVISOR_INSTRUCTIONS,
+    }
+    result = api_request("POST", "", create_body)
+    supervisor_name = result.get("name")
+    supervisor_id = result.get("supervisor_agent_id")
+    print(f"✓ Supervisor Agent created: {supervisor_name}")
+    print(f"  Endpoint: {result.get('endpoint_name', 'N/A')}")
+    print(f"  Experiment: {result.get('experiment_id', 'N/A')}")
+else:
+    # Update instructions on existing agent (in case they changed)
+    try:
+        update_body = {
+            "display_name": SUPERVISOR_DISPLAY_NAME,
+            "description": SUPERVISOR_DESCRIPTION,
+            "instructions": SUPERVISOR_INSTRUCTIONS,
+        }
+        api_request("PATCH", f"/{supervisor_id}?update_mask=display_name,description,instructions", update_body)
+        print(f"✓ Updated existing Supervisor Agent instructions")
+    except Exception as e:
+        print(f"Note: Could not update instructions: {e}")
+
+print(f"\nSupervisor Agent ID: {supervisor_id}")
+print(f"Supervisor Agent Name: {supervisor_name}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Register All Tools
+# ============================================
+# Step 2: Register All 8 Tools (Idempotent)
+# ============================================
+
+# Get existing tools to avoid duplicate registration
+existing_tool_ids = set()
+try:
+    result = api_request("GET", f"/{supervisor_id}/tools")
+    for t in result.get("tools", []):
+        existing_tool_ids.add(t.get("tool_id"))
+    print(f"Existing tools: {len(existing_tool_ids)}")
+except Exception as e:
+    print(f"Note: Could not list existing tools: {e}")
+
+print(f"\nRegistering {len(TOOLS_CONFIG)} tools...")
+success_count = 0
+for tool_id, tool_type, spec, description in TOOLS_CONFIG:
+    if tool_id in existing_tool_ids:
+        print(f"  ✓ {tool_id} (already registered)")
+        success_count += 1
+        continue
+    
+    tool_body = {
+        "tool_type": tool_type,
+        "description": description,
+        **spec,
+    }
+    
+    try:
+        api_request("POST", f"/{supervisor_id}/tools?tool_id={tool_id}", tool_body)
+        print(f"  ✓ {tool_id} (registered)")
+        success_count += 1
+    except Exception as e:
+        print(f"  ✗ {tool_id}: {str(e)[:200]}")
+
+print(f"\n✓ {success_count}/{len(TOOLS_CONFIG)} tools registered")
 
 # COMMAND ----------
 
 # DBTITLE 1,Verify Supervisor Agent
 # ============================================
-# Verify Supervisor Agent Configuration
+# Step 3: Verify Configuration & Endpoint Status
 # ============================================
 
 print("=" * 60)
 print("SUPERVISOR AGENT CONFIGURATION SUMMARY")
 print("=" * 60)
 
-# Get the supervisor agent
-sa = w.supervisor_agents.get_supervisor_agent(name=supervisor_name)
-print(f"\nDisplay Name: {sa.display_name}")
-print(f"Description: {sa.description[:100]}...")
-print(f"Resource Name: {sa.name}")
+# Get the Supervisor Agent
+agent = api_request("GET", f"/{supervisor_id}")
+print(f"\n  Display Name: {agent.get('display_name')}")
+print(f"  Description: {agent.get('description', '')[:80]}...")
+print(f"  Supervisor ID: {agent.get('supervisor_agent_id')}")
+print(f"  Endpoint Name: {agent.get('endpoint_name', 'N/A')}")
+print(f"  Experiment ID: {agent.get('experiment_id', 'N/A')}")
+print(f"  Instructions: {len(agent.get('instructions', ''))} chars")
 
-# List all tools (subagents)
-print("\n--- Registered Subagents ---")
-tool_count = 0
+# Get registered tools
+tools_result = api_request("GET", f"/{supervisor_id}/tools")
+tools = tools_result.get("tools", [])
+print(f"\n  Tools ({len(tools)}):")
+for t in tools:
+    print(f"    [{t.get('tool_type')}] {t.get('tool_id')}")
+
+# Check endpoint status
+print(f"\n  Endpoint Status:")
 try:
-    for tool in w.supervisor_agents.list_tools(parent=supervisor_name):
-        print(f"  [{tool.tool_type}] {tool.name.split('/')[-1]}: {tool.description[:80]}...")
-        tool_count += 1
+    for ep in w.serving_endpoints.list():
+        if ep.name == agent.get('endpoint_name'):
+            print(f"    {ep.name}: {ep.state.ready}")
+            break
+    else:
+        # Check sub-agent endpoints too
+        for ep in w.serving_endpoints.list():
+            if 'pc_' in ep.name.lower() or 'mas' in ep.name.lower():
+                print(f"    {ep.name}: {ep.state.ready}")
 except Exception as e:
-    print(f"  Listing tools: {e}")
+    print(f"    Could not check endpoints: {e}")
 
-print(f"\nTotal subagents: {tool_count}")
-
-# List examples
-print("\n--- Quality Examples ---")
-example_count = 0
-try:
-    for ex in w.supervisor_agents.list_examples(parent=supervisor_name):
-        print(f"  Q: {ex.question[:80]}...")
-        example_count += 1
-except Exception as e:
-    print(f"  Listing examples: {e}")
-
-print(f"\nTotal examples: {example_count}")
 print("\n" + "=" * 60)
-print("✓ Supervisor Agent Setup Complete!")
+print("SUPERVISOR AGENT SETUP COMPLETE")
 print("=" * 60)
-print(f"\nTo query the Supervisor Agent:")
-print(f"  Use AI Playground or the Databricks SDK to query: {supervisor_name}")
-print(f"  Or via the UI: Agents → P&C Insurance Medallion Architecture Team")
+print(f"\nSupervisor Agent: {supervisor_name}")
+print(f"Endpoint: {agent.get('endpoint_name', 'N/A')}")
+print(f"Tools: {len(tools)}/8 registered")
+print(f"\nTo test: Go to AI > Supervisor Agents > {SUPERVISOR_DISPLAY_NAME}")
+print("Or use the serving endpoint to send queries.")
