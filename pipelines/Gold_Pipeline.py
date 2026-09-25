@@ -242,9 +242,9 @@ retention_data = (
     )
     .agg(
         F.count("*").alias("total_policies"),
-        F.sum(F.when(F.col("status") == "Active", 1).otherwise(0)).alias("active_policies"),
-        F.sum(F.when(F.col("status") == "Cancelled", 1).otherwise(0)).alias("cancelled_policies"),
-        F.sum(F.when(F.col("status") == "Active", 1).otherwise(0)).alias("new_business_policies"),
+        F.sum(F.when(policy_dim["status"] == "Active", 1).otherwise(0)).alias("active_policies"),
+        F.sum(F.when(policy_dim["status"] == "Cancelled", 1).otherwise(0)).alias("cancelled_policies"),
+        F.sum(F.when(policy_dim["status"] == "Active", 1).otherwise(0)).alias("new_business_policies"),
         F.sum("coverage_amount").alias("total_written_premium")
     )
     .withColumn("renewed_policies", F.col("active_policies") - F.col("new_business_policies"))
