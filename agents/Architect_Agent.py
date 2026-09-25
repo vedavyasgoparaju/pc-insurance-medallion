@@ -235,19 +235,24 @@ print(f"Deploying model: {model_uri}")
 # Create serving endpoint (if not exists)
 endpoint_name = "pc_architect_agent"
 try:
+    from databricks.sdk.service.serving import TrafficConfig, Route
+    served_model_name = f"pc_architect_agent-{latest_version}"
     w.serving_endpoints.create(
         name=endpoint_name,
         config=EndpointCoreConfigInput(
+            name=endpoint_name,
             served_models=[
                 ServedModelInput(
                     model_name="workspace.default.pc_architect_agent",
-                    model_version=latest_version,
+                    model_version=str(latest_version),
                     workload_size="Small",
                     scale_to_zero_enabled=True,
                     environment_vars={},
                 )
             ],
-            traffic_config={"routes": [{"served_model_name": "workspace.default.pc_architect_agent", "traffic_percentage": 100}]},
+            traffic_config=TrafficConfig(
+                routes=[Route(served_model_name=served_model_name, traffic_percentage=100)]
+            ),
         )
     )
     print(f"✓ Creating serving endpoint: {endpoint_name}")

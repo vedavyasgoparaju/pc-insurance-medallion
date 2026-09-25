@@ -171,12 +171,19 @@ for cfg in configs:
         spark.sql(f"TRUNCATE TABLE {staging_table}")
         print(f"  ✓ Staging truncated: {staging_table.split('.')[-1]}")
         
-        # Step 2b: For INITIAL load, also truncate target
+        # Step 2b: For INITIAL load, truncate target and clear Auto Loader checkpoints
         target_before = spark.sql(f"SELECT COUNT(*) FROM {target_table}").collect()[0][0]
         if LOAD_TYPE == "INITIAL":
             spark.sql(f"TRUNCATE TABLE {target_table}")
             target_before = 0
             print(f"  ✓ Target truncated (INITIAL): {target_table.split('.')[-1]}")
+            # Clear Auto Loader checkpoints so all source files are re-processed
+            checkpoint_path = f"{VOLUME}/_checkpoints/{source_name}"
+            try:
+                dbutils.fs.rm(checkpoint_path, True)
+                print(f"  ✓ Checkpoints cleared (INITIAL): {source_name}")
+            except Exception:
+                pass  # No checkpoint to clear yet
         
         # Step 2c: Count source files
         try:

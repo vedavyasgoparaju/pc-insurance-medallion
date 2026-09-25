@@ -289,10 +289,27 @@ gold_premium_growth = (
     .pivot("transaction_type")
     .agg(F.sum("type_premium"))
     .fillna(0)
-    .withColumnRenamed("New Business", "new_business_premium")
-    .withColumnRenamed("Renewal", "renewal_premium")
-    .withColumnRenamed("Endorsement", "endorsement_premium")
-    .withColumnRenamed("Cancel", "cancelled_premium")
+)
+
+# Rename pivot columns (handle missing ones gracefully - withColumnRenamed is a no-op
+# in Spark Connect when the old column doesn't exist, so check first)
+pivot_renames = {
+    "New Business": "new_business_premium",
+    "Renewal": "renewal_premium",
+    "Endorsement": "endorsement_premium",
+    "Cancel": "cancelled_premium"
+}
+for old_name, new_name in pivot_renames.items():
+    if old_name in gold_premium_growth.columns:
+        gold_premium_growth = gold_premium_growth.withColumnRenamed(old_name, new_name)
+
+# Add missing columns with default 0 (handles empty source data gracefully)
+for new_name in pivot_renames.values():
+    if new_name not in gold_premium_growth.columns:
+        gold_premium_growth = gold_premium_growth.withColumn(new_name, F.lit(0))
+
+gold_premium_growth = (
+    gold_premium_growth
     .withColumn("total_written_premium", 
         F.col("new_business_premium") + F.col("renewal_premium") + 
         F.col("endorsement_premium") - F.col("cancelled_premium"))
@@ -301,16 +318,10 @@ gold_premium_growth = (
     .withColumn("loaded_at", now)
 )
 
-# Select final columns (handle missing pivot columns gracefully)
-from pyspark.sql.functions import col
-cols = ["reporting_period", "period_type", "line_of_business"]
-for c in ["new_business_premium", "renewal_premium", "endorsement_premium", "cancelled_premium"]:
-    if c in gold_premium_growth.columns:
-        cols.append(c)
-    else:
-        gold_premium_growth = gold_premium_growth.withColumn(c, F.lit(0))
-        cols.append(c)
-cols += ["total_written_premium", "total_earned_premium", "growth_rate", "loaded_at"]
+# Select final columns
+cols = ["reporting_period", "period_type", "line_of_business",
+        "new_business_premium", "renewal_premium", "endorsement_premium", "cancelled_premium",
+        "total_written_premium", "total_earned_premium", "growth_rate", "loaded_at"]
 
 gold_premium_growth = gold_premium_growth.select(*cols)
 
@@ -402,9 +413,9 @@ gold_uw_summary.orderBy(F.desc("reporting_period")).show(10, truncate=False)
 
 # COMMAND ----------
 
+# DBTITLE 1,Gold Layer Summary
 record_gold_audit()
 
-# DBTITLE 1,Gold Layer Summary
 spark.sql(f"""
     SELECT 'loss_ratio_by_lob' AS table_name, COUNT(*) AS record_count FROM {CATALOG}.{GOLD}.loss_ratio_by_lob
     UNION ALL SELECT 'claim_frequency_severity', COUNT(*) FROM {CATALOG}.{GOLD}.claim_frequency_severity

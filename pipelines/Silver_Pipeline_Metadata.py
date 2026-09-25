@@ -1,5 +1,4 @@
 # Databricks notebook source
-
 # MAGIC %md
 # MAGIC # Metadata-Driven Silver Pipeline - P&C Insurance
 # MAGIC
@@ -124,6 +123,181 @@ def perform_scd2_merge(staging_table, target_table, business_key, scd2_columns, 
 
 # COMMAND ----------
 
+# DBTITLE 1,Bronze → Silver Transformation Functions
+# ============================================
+# Bronze → Silver Transformation Functions
+# ============================================
+# Each function maps bronze source columns to the silver target schema,
+# applying column renames, type casts, and derived columns.
+
+def transform_bronze_to_silver(trans_name, bronze_df):
+    """Transform a deduplicated bronze DataFrame to the silver target schema."""
+    
+    if trans_name == "policy_dim":
+        return (
+            bronze_df.select(
+                F.col("policy_id"),
+                F.col("customer_id"),
+                F.col("agent_id"),
+                F.col("line_of_business"),
+                F.col("policy_number"),
+                F.col("effective_date"),
+                F.col("expiry_date").alias("expiration_date"),
+                F.col("policy_status").alias("status"),
+                F.col("coverage_limit").cast("bigint").alias("coverage_amount"),
+                F.col("deductible").cast("bigint").alias("deductible"),
+                F.lit(1).cast("int").alias("is_current"),
+                F.current_timestamp().cast("date").alias("effective_from"),
+                F.lit(None).cast("date").alias("effective_to"),
+                F.current_timestamp().alias("load_timestamp"),
+                F.current_timestamp().alias("updated_timestamp"),
+            )
+        )
+    
+    elif trans_name == "claim_dim":
+        return (
+            bronze_df.select(
+                F.col("claim_id"),
+                F.col("policy_id"),
+                F.col("claim_number"),
+                F.col("loss_date"),
+                F.col("report_date"),
+                F.col("claim_status"),
+                F.col("claim_type"),
+                F.datediff(F.col("report_date"), F.col("loss_date")).alias("report_lag_days"),
+                F.lit(1).cast("int").alias("is_current"),
+                F.current_timestamp().cast("date").alias("effective_from"),
+                F.lit(None).cast("date").alias("effective_to"),
+                F.current_timestamp().alias("load_timestamp"),
+                F.current_timestamp().alias("updated_timestamp"),
+            )
+        )
+    
+    elif trans_name == "customer_dim":
+        return (
+            bronze_df.select(
+                F.col("customer_id"),
+                F.split(F.col("customer_name"), " ", 2).getItem(0).alias("first_name"),
+                F.coalesce(F.split(F.col("customer_name"), " ", 2).getItem(1), F.lit("")).alias("last_name"),
+                F.col("email"),
+                F.col("phone"),
+                F.col("address_line1").alias("address"),
+                F.col("city"),
+                F.col("state"),
+                F.col("zip_code"),
+                F.col("date_of_birth"),
+                F.floor(F.datediff(F.current_date(), F.col("date_of_birth")) / F.lit(365.25)).cast("int").alias("age"),
+                F.lit(1).cast("int").alias("is_current"),
+                F.current_timestamp().cast("date").alias("effective_from"),
+                F.lit(None).cast("date").alias("effective_to"),
+                F.current_timestamp().alias("load_timestamp"),
+                F.current_timestamp().alias("updated_timestamp"),
+            )
+        )
+    
+    elif trans_name == "agent_dim":
+        return (
+            bronze_df.select(
+                F.col("agent_id"),
+                F.col("agent_name"),
+                F.col("license_state").alias("state"),
+                F.col("agent_license_number").alias("license_number"),
+                F.col("appointment_date").alias("hire_date"),
+                F.col("agent_status").alias("status"),
+                F.lit(1).cast("int").alias("is_current"),
+                F.current_timestamp().cast("date").alias("effective_from"),
+                F.lit(None).cast("date").alias("effective_to"),
+                F.current_timestamp().alias("load_timestamp"),
+                F.current_timestamp().alias("updated_timestamp"),
+            )
+        )
+    
+    elif trans_name == "premium_fact":
+        policies = spark.table("pc_insurance.bronze.policies_raw")
+        return (
+            bronze_df
+            .join(policies.select("policy_id", "agent_id", "line_of_business"),
+                  on="policy_id", how="left")
+            .select(
+                F.col("transaction_id").alias("premium_id"),
+                F.col("policy_id"),
+                F.col("customer_id"),
+                F.col("agent_id"),
+                F.col("line_of_business"),
+                F.date_format(F.col("transaction_date"), "yyyyMMdd").cast("int").alias("transaction_date_id"),
+                F.col("transaction_date"),
+                F.col("transaction_type"),
+                F.col("premium_amount").cast("double"),
+                F.col("commission_amount").cast("double"),
+                (F.col("premium_amount") - F.col("commission_amount")).cast("double").alias("net_premium"),
+                F.year(F.col("transaction_date")).alias("transaction_year"),
+                F.month(F.col("transaction_date")).alias("transaction_month"),
+                F.quarter(F.col("transaction_date")).alias("transaction_quarter"),
+                F.current_timestamp().alias("load_timestamp"),
+                F.current_timestamp().alias("updated_timestamp"),
+            )
+        )
+    
+    elif trans_name == "claim_fact":
+        policies = spark.table("pc_insurance.bronze.policies_raw")
+        return (
+            bronze_df
+            .join(policies.select("policy_id", "agent_id", "line_of_business"),
+                  on="policy_id", how="left")
+            .select(
+                F.col("claim_id"),
+                F.col("policy_id"),
+                F.col("customer_id"),
+                F.col("agent_id"),
+                F.col("line_of_business"),
+                F.date_format(F.col("loss_date"), "yyyyMMdd").cast("int").alias("loss_date_id"),
+                F.col("loss_date"),
+                F.date_format(F.col("report_date"), "yyyyMMdd").cast("int").alias("report_date_id"),
+                F.col("report_date"),
+                F.col("claim_status"),
+                F.col("claim_type"),
+                F.col("incurred_loss").cast("double").alias("incurred_amount"),
+                F.col("paid_loss").cast("double").alias("paid_amount"),
+                F.col("reserved_amount").cast("double").alias("reserve_amount"),
+                (F.col("incurred_loss") - F.col("paid_loss")).cast("double").alias("outstanding_amount"),
+                F.year(F.col("loss_date")).alias("loss_year"),
+                F.month(F.col("loss_date")).alias("loss_month"),
+                F.quarter(F.col("loss_date")).alias("loss_quarter"),
+                F.datediff(F.col("report_date"), F.col("loss_date")).alias("report_lag_days"),
+                F.current_timestamp().alias("load_timestamp"),
+                F.current_timestamp().alias("updated_timestamp"),
+            )
+        )
+    
+    return bronze_df  # fallback: no transformation
+
+
+def generate_date_dim():
+    """Generate date dimension from a date range (2023-01-01 to 2025-12-31)."""
+    return (
+        spark.range(0, 1)
+        .select(
+            F.explode(F.sequence(
+                F.lit("2023-01-01").cast("date"),
+                F.lit("2025-12-31").cast("date"),
+                F.expr("interval 1 day")
+            )).alias("full_date")
+        )
+        .select(
+            F.date_format(F.col("full_date"), "yyyyMMdd").cast("bigint").alias("date_id"),
+            F.dayofmonth(F.col("full_date")).alias("day"),
+            F.dayofweek(F.col("full_date")).alias("day_of_week"),
+            F.col("full_date"),
+            F.dayofweek(F.col("full_date")).isin([1, 7]).cast("bigint").alias("is_weekend"),
+            F.month(F.col("full_date")).alias("month"),
+            F.quarter(F.col("full_date")).alias("quarter"),
+            F.weekofyear(F.col("full_date")).alias("week_of_year"),
+            F.year(F.col("full_date")).alias("year"),
+        )
+    )
+
+# COMMAND ----------
+
 # DBTITLE 1,Main Processing Loop
 results = []
 
@@ -152,6 +326,41 @@ for cfg in configs:
             INSERT INTO {CAT}.{REF}.silver_load_audit 
             VALUES ('{load_id}', '{trans_name}', '{load_type}', '{start_time}', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'RUNNING', NULL)
         """)
+        
+        # Special handling for date_dim (generated from date range, not from bronze)
+        if trans_name == "date_dim":
+            date_df = generate_date_dim()
+            source_count = date_df.count()
+            spark.sql(f"DROP TABLE IF EXISTS {target_table}")
+            date_df.write.format("delta").mode("overwrite") \
+                .option("overwriteSchema", "true").saveAsTable(target_table)
+            target_count_after = spark.table(target_table).count()
+            staging_count = source_count
+            rows_inserted = target_count_after
+            rows_updated = 0
+            scd2_new = 0
+            scd2_closed = 0
+            
+            # Reconciliation
+            reconciliation_id = str(uuid.uuid4())
+            match_status = "MATCH" if target_count_after == source_count else "MISMATCH"
+            mismatch_details = None if match_status == "MATCH" else f"Expected {source_count}, got {target_count_after}"
+            spark.sql(f"""
+                INSERT INTO {CAT}.{REF}.silver_reconciliation
+                VALUES ('{reconciliation_id}', '{load_id}', '{trans_name}', {source_count}, {staging_count}, {target_count_after}, 
+                        {source_count}, '{match_status}', {'NULL' if not mismatch_details else f"'{mismatch_details}'"}, '{datetime.now()}')
+            """)
+            end_time = datetime.now()
+            spark.sql(f"""
+                UPDATE {CAT}.{REF}.silver_load_audit
+                SET load_end_time = '{end_time}', source_row_count = {source_count}, staging_row_count = {staging_count},
+                    target_row_count_after = {target_count_after}, rows_inserted = {rows_inserted}, rows_updated = {rows_updated},
+                    scd2_new_versions = {scd2_new}, scd2_closed_versions = {scd2_closed}, status = 'SUCCESS'
+                WHERE load_id = '{load_id}'
+            """)
+            results.append((trans_name, "SUCCESS", source_count, staging_count, target_count_after, match_status))
+            print(f"✓ {trans_name}: {source_count} generated → {target_count_after} Silver ({match_status})")
+            continue
         
         # Count source Bronze rows
         source_count = spark.table(source_table).count()
@@ -194,16 +403,21 @@ for cfg in configs:
         )
         
         # Write to staging
-        cleansed_df.write.format("delta").mode("append").saveAsTable(staging_table)
+        cleansed_df.write.format("delta").mode("append").option("mergeSchema", "true").saveAsTable(staging_table)
         staging_count = spark.table(staging_table).count()
         
         # Step 3: Staging → Target (depends on transformation type)
-        target_count_before = spark.table(target_table).count()
+        try:
+            target_count_before = spark.table(target_table).count()
+        except Exception:
+            target_count_before = 0
         
         if load_type == "INITIAL":
-            # INITIAL: Truncate target and do full reload
-            spark.sql(f"TRUNCATE TABLE {target_table}")
-            spark.sql(f"INSERT INTO {target_table} SELECT * FROM {staging_table}")
+            # INITIAL: Transform staging → target with correct schema
+            transformed_df = transform_bronze_to_silver(trans_name, cleansed_df)
+            spark.sql(f"DROP TABLE IF EXISTS {target_table}")
+            transformed_df.write.format("delta").mode("overwrite") \
+                .option("overwriteSchema", "true").saveAsTable(target_table)
             target_count_after = spark.table(target_table).count()
             rows_inserted = target_count_after
             rows_updated = 0
@@ -233,8 +447,11 @@ for cfg in configs:
                 scd2_closed = 0
             
             elif trans_type == "DEDUP":
-                # Simple overwrite (deduplicated)
-                spark.sql(f"INSERT OVERWRITE {target_table} SELECT * FROM {staging_table}")
+                # Simple overwrite (deduplicated, with column mapping)
+                transformed_df = transform_bronze_to_silver(trans_name, cleansed_df)
+                spark.sql(f"DROP TABLE IF EXISTS {target_table}")
+                transformed_df.write.format("delta").mode("overwrite") \
+                    .option("overwriteSchema", "true").saveAsTable(target_table)
                 target_count_after = spark.table(target_table).count()
                 rows_inserted = target_count_after
                 rows_updated = 0
