@@ -253,7 +253,17 @@ try:
     print(f"✓ Creating serving endpoint: {endpoint_name}")
 except Exception as e:
     if "already exists" in str(e).lower() or "RESOURCE_ALREADY_EXISTS" in str(e):
-        print(f"Endpoint {endpoint_name} already exists - updating...")
+        print(f"Endpoint {endpoint_name} already exists - updating to v{latest_version}...")
+        from databricks.sdk.service.serving import ServedEntityInput
+        import time
+        for _ in range(10):
+            try:
+                w.serving_endpoints.update_config(name=endpoint_name, served_entities=[ServedEntityInput(entity_name="workspace.default.pc_architect_agent", entity_version=str(latest_version), scale_to_zero_enabled=True, workload_size="Small")])
+                print(f"Updated {endpoint_name} to v{latest_version}")
+                break
+            except Exception as ue:
+                if "currently being updated" in str(ue): time.sleep(20)
+                else: print(f"Update note: {ue}"); break
     else:
         print(f"Note: {e}")
         print(f"You can also deploy from the UI: Models → pc_architect_agent → Create Serving Endpoint")
