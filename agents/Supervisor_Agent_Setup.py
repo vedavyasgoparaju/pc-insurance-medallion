@@ -30,6 +30,9 @@
 # MAGIC
 # MAGIC ## Idempotent
 # MAGIC This notebook is idempotent — it checks for an existing Supervisor Agent by display name and only creates if not found. Tools are registered only if not already present. Safe to re-run.
+# MAGIC
+# MAGIC ## Auto-Deploy
+# MAGIC Step 1b checks if the supervisor agent's serving endpoint exists. If the endpoint was deleted, the notebook automatically deletes and recreates the supervisor agent to trigger endpoint creation, then waits for the endpoint to become READY. All 8 tools are re-registered idempotently by Step 2.
 
 # COMMAND ----------
 
@@ -200,6 +203,97 @@ else:
         print(f"✓ Updated existing Supervisor Agent instructions")
     except Exception as e:
         print(f"Note: Could not update instructions: {e}")
+
+print(f"\nSupervisor Agent ID: {supervisor_id}")
+print(f"Supervisor Agent Name: {supervisor_name}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Ensure Serving Endpoint Exists (Auto-Deploy)
+# ============================================
+# Step 1b: Ensure Serving Endpoint Exists (Auto-Deploy)
+# ============================================
+# The Supervisor Agent API auto-creates the serving endpoint when the agent is
+# first created. However, if the endpoint is ever deleted (e.g., manually or by
+# a workspace cleanup), there is no API to recreate just the endpoint — the only
+# way to trigger endpoint creation is to delete and recreate the supervisor agent.
+# This cell checks if the endpoint exists, and if not, recreates the agent.
+# Tool re-registration is handled idempotently by Step 2 below.
+
+import time
+
+def endpoint_exists(endpoint_name):
+    """Check if a serving endpoint exists and return its state."""
+    try:
+        ep = w.serving_endpoints.get(endpoint_name)
+        return True, ep.state.ready if ep.state else "UNKNOWN"
+    except Exception:
+        return False, None
+
+# Get the endpoint name from the supervisor agent
+agent_info = api_request("GET", f"/{supervisor_id}")
+endpoint_name = agent_info.get("endpoint_name")
+print(f"Supervisor Agent endpoint name: {endpoint_name}")
+
+if endpoint_name:
+    exists, state = endpoint_exists(endpoint_name)
+    if exists:
+        print(f"✓ Endpoint '{endpoint_name}' exists — state: {state}")
+        if state != "READY":
+            print(f"  Waiting for endpoint to become READY...")
+            for i in range(30):
+                time.sleep(10)
+                exists, state = endpoint_exists(endpoint_name)
+                print(f"  [{i+1}/30] State: {state}")
+                if state == "READY":
+                    print(f"  ✓ Endpoint is READY!")
+                    break
+            else:
+                print(f"  ⚠ Endpoint not READY after 5 min — it may still be provisioning.")
+    else:
+        print(f"✗ Endpoint '{endpoint_name}' does NOT exist.")
+        print(f"  Recreating supervisor agent to trigger endpoint creation...")
+
+        # Delete the existing supervisor agent
+        try:
+            api_request("DELETE", f"/{supervisor_id}")
+            print(f"  ✓ Deleted old supervisor agent ({supervisor_id})")
+        except Exception as e:
+            print(f"  ⚠ Delete failed: {e}")
+
+        time.sleep(3)
+
+        # Recreate the supervisor agent
+        create_body = {
+            "display_name": SUPERVISOR_DISPLAY_NAME,
+            "description": SUPERVISOR_DESCRIPTION,
+            "instructions": SUPERVISOR_INSTRUCTIONS,
+        }
+        result = api_request("POST", "", create_body)
+        supervisor_name = result.get("name")
+        supervisor_id = result.get("supervisor_agent_id")
+        new_endpoint = result.get("endpoint_name")
+        print(f"  ✓ Recreated supervisor agent: {supervisor_name}")
+        print(f"    New ID: {supervisor_id}")
+        print(f"    New endpoint: {new_endpoint}")
+
+        # Wait for the endpoint to be created and become ready
+        print(f"\n  Waiting for endpoint '{new_endpoint}' to become READY...")
+        for i in range(60):
+            time.sleep(10)
+            exists, state = endpoint_exists(new_endpoint)
+            if exists:
+                print(f"  [{i+1}/60] Endpoint exists — state: {state}")
+                if state == "READY":
+                    print(f"  ✓ Endpoint is READY!")
+                    break
+            else:
+                if i % 6 == 5:
+                    print(f"  [{i+1}/60] Endpoint not yet created...")
+        else:
+            print(f"  ⚠ Endpoint not READY after 10 min — check the Supervisor Agent UI.")
+else:
+    print("⚠ No endpoint name returned by the Supervisor Agent API.")
 
 print(f"\nSupervisor Agent ID: {supervisor_id}")
 print(f"Supervisor Agent Name: {supervisor_name}")
