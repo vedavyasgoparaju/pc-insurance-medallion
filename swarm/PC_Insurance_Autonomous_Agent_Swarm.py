@@ -481,6 +481,15 @@ class SwarmState(TypedDict, total=False):
     human_escalation_reason: str          # If halted, why
     final_status: str                     # "resolved", "halted", "escalated"
 
+    # ── Autonomous Enhancements (Iteration 2) ──────────────────────
+    pre_fix_timestamp: str                # ISO timestamp before fix (for rollback)
+    dq_score_before: float                # DQ score before fix (NULL if not measured)
+    dq_score_after: float                 # DQ score after fix (NULL if not measured)
+    circuit_breaker_triggered: bool       # True if circuit breaker halted the swarm
+    previous_fix_applied: str             # Description of past successful fix (from knowledge base)
+    rollback_performed: bool              # True if automated rollback was triggered
+    fix_history_id: str                   # UUID of the swarm_fix_history record
+
 
 # ── Helper: Initialize a fresh SwarmState ──────────────────────────
 
@@ -518,7 +527,164 @@ def init_swarm_state(run_id: str, trigger_source: str = "alert") -> SwarmState:
         messages=[],
         human_escalation_reason="",
         final_status="",
+        # Autonomous enhancements
+        pre_fix_timestamp="",
+        dq_score_before=None,
+        dq_score_after=None,
+        circuit_breaker_triggered=False,
+        previous_fix_applied="",
+        rollback_performed=False,
+        fix_history_id=str(uuid.uuid4()),
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Autonomous Enhancement Helpers (Iteration 2)
+# ═══════════════════════════════════════════════════════════════
+
+CIRCUIT_BREAKER_THRESHOLD = 3  # Max failed attempts on same error class within 24h
+
+def query_fix_history(error_class: str, hours: int = 24) -> list:
+    """Query swarm_fix_history for recent fixes matching the error class.
+    Used by the circuit breaker and the fix knowledge base."""
+    try:
+        df = spark.sql(f"""
+            SELECT fix_id, error_class, fix_applied, dq_score_before, dq_score_after,
+                   resolution_status, fix_timestamp, rollback_performed
+            FROM pc_insurance.metadata.swarm_fix_history
+            WHERE error_class = '{error_class}'
+              AND fix_timestamp >= TIMESTAMPADD(HOUR, -{hours}, CURRENT_TIMESTAMP())
+            ORDER BY fix_timestamp DESC
+            LIMIT 10
+        """)
+        return df.collect()
+    except Exception as e:
+        logging.getLogger("SwarmHelpers").warning(f"Fix history query failed: {e}")
+        return []
+
+def check_circuit_breaker(error_class: str) -> tuple:
+    """Check if the same error class has failed too many times recently.
+    Returns (should_halt, failed_count, details)."""
+    if not error_class:
+        return False, 0, ""
+    history = query_fix_history(error_class, hours=24)
+    failed = [h for h in history if h["resolution_status"] in ("failed", "rollback")]
+    if len(failed) >= CIRCUIT_BREAKER_THRESHOLD:
+        return True, len(failed), (
+            f"Circuit breaker: {len(failed)} failed attempts on '{error_class}' in last 24h. "
+            f"Escalating to human instead of retrying."
+        )
+    return False, len(failed), ""
+
+def get_previous_successful_fix(error_class: str) -> str:
+    """Find the most recent successful fix for the same error class.
+    Used by the Triage agent to suggest proven fixes."""
+    try:
+        df = spark.sql(f"""
+            SELECT fix_applied, dq_score_before, dq_score_after
+            FROM pc_insurance.metadata.swarm_fix_history
+            WHERE error_class = '{error_class}'
+              AND resolution_status = 'resolved'
+            ORDER BY fix_timestamp DESC
+            LIMIT 1
+        """)
+        rows = df.collect()
+        if rows:
+            row = rows[0]
+            dq_info = ""
+            if row["dq_score_before"] is not None and row["dq_score_after"] is not None:
+                dq_info = f" (DQ: {row['dq_score_before']:.2f} → {row['dq_score_after']:.2f})"
+            return f"{row['fix_applied']}{dq_info}"
+    except Exception:
+        pass
+    return ""
+
+def log_fix_to_history(state: SwarmState) -> None:
+    """Persist the swarm run result to swarm_fix_history for cumulative learning."""
+    try:
+        fix_id = state.get("fix_history_id", str(uuid.uuid4()))
+        dq_before = state.get("dq_score_before")
+        dq_after = state.get("dq_score_after")
+        error_msg = (state.get("error_log", "") or "")[:500].replace("'", "''")
+        fix_desc = str(state.get("metadata_delta", "") or "")[:500].replace("'", "''")
+        post_mortem = (state.get("technical_docs_payload", {}).get("post_mortem", "") or "")[:200].replace("'", "''")
+
+        spark.sql(f"""
+            INSERT INTO pc_insurance.metadata.swarm_fix_history
+            (fix_id, run_id, trigger_source, error_class, error_message, affected_table,
+             fix_applied, dq_score_before, dq_score_after, resolution_status,
+             fix_timestamp, swarm_duration_sec, token_cost_usd, rollback_performed,
+             post_mortem_path)
+            VALUES (
+                '{fix_id}',
+                '{state.get("run_id", "")}',
+                '{state.get("trigger_source", "")}',
+                '{state.get("error_class", "unknown")}',
+                '{error_msg}',
+                '{state.get("affected_table", "")}',
+                '{fix_desc}',
+                {dq_before if dq_before is not None else "NULL"},
+                {dq_after if dq_after is not None else "NULL"},
+                '{state.get("final_status", "unknown")}',
+                CURRENT_TIMESTAMP(),
+                0,
+                {state.get("token_cost_usd", 0.0)},
+                {str(state.get("rollback_performed", False)).lower()},
+                '{post_mortem}'
+            )
+        """)
+    except Exception as e:
+        logging.getLogger("SwarmHelpers").warning(f"Failed to log fix history: {e}")
+
+def calculate_dq_score_for_table(table_name: str) -> float:
+    """Calculate a DQ score for a table using basic checks. Returns 0.0-1.0."""
+    try:
+        df = spark.sql(f"SELECT COUNT(*) AS cnt FROM {table_name}")
+        total = df.collect()[0]["cnt"]
+        if total == 0:
+            return 1.0
+        failed = 0
+        for col_check in ["policy_id", "claim_id", "customer_id", "agent_id", "premium_amount"]:
+            try:
+                null_df = spark.sql(f"SELECT COUNT(*) AS nulls FROM {table_name} WHERE {col_check} IS NULL")
+                failed += null_df.collect()[0]["nulls"]
+            except Exception:
+                pass
+        score = 1.0 - (failed / total) if total > 0 else 1.0
+        return max(0.0, min(1.0, score))
+    except Exception as e:
+        logging.getLogger("SwarmHelpers").warning(f"DQ score calculation failed for {table_name}: {e}")
+        return 1.0
+
+def perform_rollback(affected_table: str, pre_fix_timestamp: str) -> bool:
+    """Roll back a table to its pre-fix Delta Lake version using time travel."""
+    try:
+        spark.sql(f"RESTORE TABLE {affected_table} TO TIMESTAMP AS OF '{pre_fix_timestamp}'")
+        logging.getLogger("SwarmHelpers").info(f"Rollback successful: {affected_table} restored to {pre_fix_timestamp}")
+        return True
+    except Exception as e:
+        logging.getLogger("SwarmHelpers").error(f"Rollback failed for {affected_table}: {e}")
+        return False
+
+def verify_downstream_freshness(affected_table: str, downstream_tables: list) -> list:
+    """After repair, verify that downstream tables reflect the repaired data.
+    Returns a list of stale downstream tables that need rerunning."""
+    stale = []
+    try:
+        repaired_df = spark.sql(f"DESCRIBE HISTORY {affected_table} LIMIT 1")
+        repaired_version = repaired_df.collect()[0]["timestamp"]
+        for downstream in downstream_tables:
+            try:
+                ds_df = spark.sql(f"DESCRIBE HISTORY {downstream} LIMIT 1")
+                ds_version = ds_df.collect()[0]["timestamp"]
+                if ds_version < repaired_version:
+                    stale.append(downstream)
+            except Exception:
+                pass
+    except Exception as e:
+        logging.getLogger("SwarmHelpers").warning(f"Downstream freshness check failed: {e}")
+    return stale
+
 
 # COMMAND ----------
 
@@ -1145,6 +1311,19 @@ Return your routing decision as JSON with keys: next_agent, reasoning, failure_d
         if not self._check_loop_guard(state):
             return state
 
+        # ── Circuit Breaker: Check if same error class has failed too many times ──
+        if state.get("phase") == SwarmPhase.PLAN.value and state.get("error_class"):
+            should_halt, failed_count, details = check_circuit_breaker(state["error_class"])
+            if should_halt:
+                state["phase"] = SwarmPhase.HALTED.value
+                state["circuit_breaker_triggered"] = True
+                state["human_escalation_reason"] = details
+                state["final_status"] = "halted"
+                state["next_agent"] = AgentRole.HUMAN_ESCALATION.value
+                self.logger.warning(f"Circuit breaker triggered: {details}")
+                state = self._log_action(state, "circuit_breaker", details)
+                return state
+
         state["attempt_counter"] = state.get("attempt_counter", 0) + 1
 
         # ── Determine routing based on current phase ──
@@ -1313,6 +1492,16 @@ Return JSON with keys: error_class, affected_table, downstream_impact (list), po
             state["error_class"] = self._heuristic_classify(state.get("error_log", ""))
             state = self._log_action(state, "error_classified_heuristic",
                 f"Heuristic error class: {state['error_class']}")
+
+        # ── Step 3b: Query fix knowledge base for past successful fixes ──
+        previous_fix = get_previous_successful_fix(state.get("error_class", ""))
+        if previous_fix:
+            state["previous_fix_applied"] = previous_fix
+            state = self._log_action(state, "fix_knowledge_base",
+                f"Previous successful fix found: {previous_fix[:200]}")
+        else:
+            state = self._log_action(state, "fix_knowledge_base",
+                "No previous successful fix found for this error class")
 
         # ── Step 4: Transition to EXECUTE phase ──
         state["phase"] = SwarmPhase.EXECUTE.value
@@ -1634,6 +1823,14 @@ Return JSON with keys: validation_passed, ddl_statements, uc_comment_update, tec
     def process(self, state: SwarmState) -> SwarmState:
         self.logger.info("Data Engineer Agent activated")
 
+        # ── Capture pre-fix timestamp for potential rollback ──
+        affected_table = state.get("affected_table", "")
+        if affected_table and not state.get("pre_fix_timestamp"):
+            state["pre_fix_timestamp"] = datetime.datetime.now().isoformat()
+            state["dq_score_before"] = calculate_dq_score_for_table(affected_table)
+            state = self._log_action(state, "pre_fix_snapshot",
+                f"Pre-fix DQ: {state['dq_score_before']:.2f}, timestamp: {state['pre_fix_timestamp']}")
+
         x_center = state.get("target_x_center", state.get("affected_x_center", ""))
         layer = state.get("target_layer", state.get("affected_layer", ""))
         mapping_after = state.get("mapping_document_after", {})
@@ -1897,6 +2094,36 @@ Return JSON with keys: validation_passed, failed_expectations, row_count, null_v
             f"Failed expectations: {len(validation_results.get('failed_expectations', []))}, "
             f"Schema issues: {len(schema_issues)}")
 
+        # ── Step 4b: Calculate DQ scores for rollback assessment ──
+        affected_table = state.get("affected_table", "")
+        sandbox_cat = state.get("sandbox_catalog", "")
+        if sandbox_cat and affected_table and "." in affected_table:
+            check_table = sandbox_cat + "." + affected_table.split(".", 1)[1]
+        else:
+            check_table = affected_table
+        if check_table:
+            state["dq_score_after"] = calculate_dq_score_for_table(check_table)
+
+        # ── Automated Rollback: If DQ dropped, roll back and escalate ──
+        if state.get("dq_score_before") is not None and state.get("dq_score_after") is not None:
+            if state["dq_score_after"] < state["dq_score_before"]:
+                pre_ts = state.get("pre_fix_timestamp", "")
+                if pre_ts and affected_table:
+                    rollback_ok = perform_rollback(affected_table, pre_ts)
+                    state["rollback_performed"] = rollback_ok
+                    state = self._log_action(state, "auto_rollback",
+                        f"DQ dropped {state['dq_score_before']:.2f} → {state['dq_score_after']:.2f}, "
+                        f"rollback {'succeeded' if rollback_ok else 'failed'}")
+                    state["phase"] = SwarmPhase.HALTED.value
+                    state["human_escalation_reason"] = (
+                        f"Automated rollback: DQ dropped from "
+                        f"{state['dq_score_before']:.2f} to {state['dq_score_after']:.2f}. "
+                        f"Table restored. Human review required."
+                    )
+                    state["final_status"] = "halted"
+                    state["next_agent"] = AgentRole.HUMAN_ESCALATION.value
+                    return state
+
         # ── Step 5: Route based on validation result ──
         if state["validation_passed"]:
             state["phase"] = SwarmPhase.DEPLOY.value
@@ -2090,6 +2317,19 @@ Return JSON with keys: repair_triggered, docs_written, git_pr_url, sandbox_clean
         repair_result = trigger_pipeline_repair(run_id)
         state = self._log_action(state, "pipeline_repair",
             f"Run {run_id}: {repair_result.get('status')}")
+
+        # ── Step 3b: Dependency-aware repair verification ──
+        affected_table = state.get("affected_table", "")
+        downstream = state.get("downstream_impact", [])
+        if affected_table and downstream:
+            stale_tables = verify_downstream_freshness(affected_table, downstream)
+            if stale_tables:
+                state = self._log_action(state, "stale_downstream",
+                    f"{len(stale_tables)} downstream tables stale: {', '.join(stale_tables[:5])}. "
+                    f"Recommend rerunning dependent tasks.")
+            else:
+                state = self._log_action(state, "downstream_verified",
+                    "All downstream tables reflect repaired data")
 
         # ── Step 4: Create Git branch and PR (if Git is configured) ──
         git_pr_url = self._create_git_pr(state)
@@ -2929,6 +3169,11 @@ def execute_swarm(initial_state: SwarmState, use_graph: bool = True) -> SwarmSta
         try:
             config = {"configurable": {"thread_id": initial_state["session_id"]}}
             final_state = swarm_graph.invoke(initial_state, config=config)
+            # Log fix to history for cumulative learning
+            try:
+                log_fix_to_history(final_state)
+            except Exception as e:
+                logger.warning(f"Failed to log fix history: {e}")
             return final_state
         except Exception as e:
             logger.error(f"LangGraph execution failed: {e}")
@@ -3001,6 +3246,12 @@ def _execute_sequential(state: SwarmState) -> SwarmState:
             print(alert)
             break
 
+    # ── Log fix to history for cumulative learning ──
+    try:
+        log_fix_to_history(state)
+    except Exception as e:
+        logger.warning(f"Failed to log fix history: {e}")
+
     # ── Print final summary ──
     print("\n" + "=" * 70)
     print("SWARM EXECUTION COMPLETE")
@@ -3011,6 +3262,18 @@ def _execute_sequential(state: SwarmState) -> SwarmState:
     print(f"  Token Cost: ${state.get('token_cost_usd', 0):.2f}")
     print(f"  Phase: {state.get('phase', 'unknown')}")
     print(f"  Error Class: {state.get('error_class', 'N/A')}")
+    if state.get("circuit_breaker_triggered"):
+        print(f"  Circuit Breaker: TRIGGERED")
+    if state.get("previous_fix_applied"):
+        print(f"  Previous Fix: {state['previous_fix_applied'][:100]}")
+    if state.get("dq_score_before") is not None:
+        dq_after = state.get("dq_score_after")
+        if dq_after is not None:
+            print(f"  DQ Score: {state['dq_score_before']:.2f} → {dq_after:.2f}")
+        else:
+            print(f"  DQ Score Before: {state['dq_score_before']:.2f}")
+    if state.get("rollback_performed"):
+        print(f"  Rollback: PERFORMED")
     print(f"  Mapping Updated: {state.get('metadata_update_applied', False)}")
     print(f"  Validation Passed: {state.get('validation_passed', False)}")
     print(f"  UC Comments Updated: {state.get('uc_comments_updated', False)}")
@@ -3416,6 +3679,19 @@ if run_id and run_id.strip():
     print("  Attempts: " + str(final_state.get("attempt_counter", 0)))
     print("  Token Cost: $" + str(round(final_state.get("token_cost_usd", 0), 2)))
     print("  Phase: " + str(final_state.get("phase", "unknown")))
+    if final_state.get("circuit_breaker_triggered"):
+        print("  Circuit Breaker: TRIGGERED")
+    if final_state.get("previous_fix_applied"):
+        print("  Previous Fix: " + str(final_state["previous_fix_applied"])[:100])
+    dq_before = final_state.get("dq_score_before")
+    dq_after = final_state.get("dq_score_after")
+    if dq_before is not None:
+        if dq_after is not None:
+            print("  DQ Score: " + str(round(dq_before, 2)) + " → " + str(round(dq_after, 2)))
+        else:
+            print("  DQ Score Before: " + str(round(dq_before, 2)))
+    if final_state.get("rollback_performed"):
+        print("  Rollback: PERFORMED")
 
     if final_state.get("human_escalation_reason"):
         print()
