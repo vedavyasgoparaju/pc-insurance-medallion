@@ -127,12 +127,14 @@ flowchart TB
     J2 -.->|"on failure"| Swarm
 
     subgraph Consumption["📊 Consumption Layer"]
-        BI["BI Dashboards"]
-        AQ["Analyst Agent Queries"]
-        ML["ML Models"]
+        AQ["Analyst Agent Queries ✅"]
+        BI["BI Dashboards 🔲 (Planned)"]
+        ML["ML Models 🔲 (Planned)"]
     end
 
-    Gold --> BI & AQ & ML
+    Gold --> AQ
+    Gold -.->|"planned"| BI
+    Gold -.->|"planned"| ML
 
 ```
 

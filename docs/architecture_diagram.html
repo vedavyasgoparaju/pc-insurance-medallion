@@ -46,7 +46,8 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; }
     <div class="legend-item"><div class="legend-swatch" style="background:#4a90d9"></div> AI Agents</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#e85d75"></div> Swarm</div>
     <div class="legend-item"><div class="legend-swatch" style="background:#32cd32"></div> Jobs</div>
-    <div class="legend-item"><div class="legend-swatch" style="background:#ffa500"></div> Consumption</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#ffa500"></div> Consumption (Active)</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:#fff5e6;border-style:dashed;border-color:#ffa500"></div> Planned</div>
 </div>
 <div class="diagram-container">
 <svg width="1200" height="860" viewBox="0 0 1200 860">
@@ -166,15 +167,15 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; }
 <rect x="760" y="640" width="410" height="130" rx="8" class="group-bg" style="fill:#fffaf0;stroke:#ffa500"/>
 <text x="965" y="634" class="group-label" text-anchor="middle">Consumption Layer</text>
 
-<g class="comp"><rect x="790" y="660" width="110" height="40" rx="5" fill="#ffa500" stroke="#e07800" stroke-width="1.5" opacity="0.85"/><text x="845" y="685" class="comp-label" fill="#fff">BI Dashboards</text><g class="tooltip" transform="translate(790, 705)"><rect class="tooltip-box" x="0" y="0" width="240" height="40"/><text class="tooltip-title" x="10" y="18">BI Dashboards</text><text class="tooltip-text" x="10" y="34"><tspan>AI/BI dashboards on Gold layer KPIs</tspan></text></g></g>
+<g class="comp"><rect x="790" y="660" width="110" height="40" rx="5" fill="#fff5e6" stroke="#ffa500" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.7"/><text x="845" y="682" class="comp-label" fill="#cc8800">BI Dashboards</text><text x="845" y="694" class="comp-sub" fill="#cc8800">(Planned)</text><g class="tooltip" transform="translate(790, 705)"><rect class="tooltip-box" x="0" y="0" width="240" height="50"/><text class="tooltip-title" x="10" y="18">BI Dashboards (Planned — Not Yet Built)</text><text class="tooltip-text" x="10" y="34"><tspan>AI/BI dashboards on Gold layer KPIs</tspan><tspan>Future: uw_dashboard_summary, loss_ratio_by_lob</tspan></text></g></g>
 
-<g class="comp"><rect x="915" y="660" width="110" height="40" rx="5" fill="#ffa500" stroke="#e07800" stroke-width="1.5" opacity="0.85"/><text x="970" y="685" class="comp-label" fill="#fff">Analyst Queries</text><g class="tooltip" transform="translate(915, 705)"><rect class="tooltip-box" x="0" y="0" width="240" height="40"/><text class="tooltip-title" x="10" y="18">Analyst Agent Queries</text><text class="tooltip-text" x="10" y="34"><tspan>Natural-language queries via Genie Space</tspan></text></g></g>
+<g class="comp"><rect x="915" y="660" width="110" height="40" rx="5" fill="#ffa500" stroke="#e07800" stroke-width="2"/><text x="970" y="682" class="comp-label" fill="#fff">Analyst Queries</text><text x="970" y="694" class="comp-sub" fill="#ffe5cc">✅ Active</text><g class="tooltip" transform="translate(915, 705)"><rect class="tooltip-box" x="0" y="0" width="260" height="50"/><text class="tooltip-title" x="10" y="18">Analyst Agent Queries (Active)</text><text class="tooltip-text" x="10" y="34"><tspan>Natural-language queries via Genie Space</tspan><tspan>Genie Space: PC_Insurance_Analyst</tspan></text></g></g>
 
-<g class="comp"><rect x="1040" y="660" width="110" height="40" rx="5" fill="#ffa500" stroke="#e07800" stroke-width="1.5" opacity="0.85"/><text x="1095" y="685" class="comp-label" fill="#fff">ML Models</text><g class="tooltip" transform="translate(1040, 705)"><rect class="tooltip-box" x="0" y="0" width="240" height="40"/><text class="tooltip-title" x="10" y="18">ML Models (Future)</text><text class="tooltip-text" x="10" y="34"><tspan>Fraud detection, claim prediction, churn</tspan></text></g></g>
+<g class="comp"><rect x="1040" y="660" width="110" height="40" rx="5" fill="#fff5e6" stroke="#ffa500" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.7"/><text x="1095" y="682" class="comp-label" fill="#cc8800">ML Models</text><text x="1095" y="694" class="comp-sub" fill="#cc8800">(Planned)</text><g class="tooltip" transform="translate(1040, 705)"><rect class="tooltip-box" x="0" y="0" width="240" height="50"/><text class="tooltip-title" x="10" y="18">ML Models (Planned — Not Yet Built)</text><text class="tooltip-text" x="10" y="34"><tspan>Fraud detection, claim prediction, churn</tspan><tspan>Listed in ARCHITECTURE.md Future Enhancements</tspan></text></g></g>
 
-<line x1="600" y1="160" x2="845" y2="660" class="arrow"/>
+<line x1="600" y1="160" x2="845" y2="660" class="arrow-dashed"/>
 <line x1="600" y1="160" x2="970" y2="660" class="arrow"/>
-<line x1="600" y1="160" x2="1095" y2="660" class="arrow"/>
+<line x1="600" y1="160" x2="1095" y2="660" class="arrow-dashed"/>
 
 <text x="600" y="800" font-size="11" fill="#666" text-anchor="middle" font-style="italic">P&amp;C Insurance Medallion Architecture v4.0 · Single catalog: pc_insurance · 6 schemas · 8 AI agents · LangGraph self-healing swarm</text>
 <text x="600" y="816" font-size="10" fill="#999" text-anchor="middle">Hover over any box for detailed functionality · See ARCHITECTURE.md for full documentation</text>
