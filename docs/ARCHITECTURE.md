@@ -1,7 +1,7 @@
 # P&C Insurance Medallion Architecture
 
-**Version:** 3.0  
-**Last Updated:** 2026-09-25  
+**Version:** 4.0  
+**Last Updated:** 2026-09-28  
 **Repository:** `vedavyasgoparaju/pc-insurance-medallion`  
 **Workspace:** `https://dbc-ec4d2e3d-58c3.cloud.databricks.com`
 
@@ -174,7 +174,8 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 - ✅ Handle errors and fallback logic
 
 **Implementation**: `Supervisor_Agent.py`
-**Endpoint**: `mas-05a49b97-endpoint` (READY)
+**Endpoint**: `mas-3fcb11f6-endpoint` (READY)
+**Agent ID**: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`
 
 ### 2. Architect Agent
 
@@ -322,6 +323,46 @@ INSERT INTO gold_metric_config VALUES (
 
 ---
 
+## Autonomous Agent Swarm
+
+The platform includes a **LangGraph-based autonomous agent swarm** that provides self-healing pipeline operations.
+
+### Architecture
+
+The swarm uses a **Plan-Execute-Verify-Deploy** loop with 6 specialized agents:
+
+1. **Supervisor** — Orchestrates the swarm, assigns tasks (Llama 3.3 70B)
+2. **Triage** — Fetches real error logs via `jobs.get_run()` and `jobs.get_run_output()`
+3. **Business Analyst** — Updates mapping metadata in `pc_insurance_dev.metadata.mapping_documents`
+4. **Data Engineer** — Applies schema/code fixes using the toolkit functions
+5. **QA** — Validates fixes using `pc_insurance.dq.calculate_dq_score`
+6. **Deployment** — Triggers pipeline repair via `jobs.repair_run()`
+
+### Metadata Catalog
+
+- **Catalog**: `pc_insurance_dev.metadata`
+- **Tables**: `mapping_documents` (7 rows, ACORD-standard mappings), `threshold_controls` (4 rows, KPI thresholds with CAT event overrides)
+- **UC Volume**: `pc_insurance_dev.metadata.technical_docs` with subdirs: `post_mortems`, `schema_docs`, `escalations`
+
+### Guardrails
+
+- Max 5 ReAct iterations per agent
+- $25 token budget per swarm run
+- UC Network Rules enforced
+- Sandbox isolation (prefix `dev_staging_`)
+
+### Trigger Paths
+
+1. **Automatic**: Pipeline task fails → `autonomous_swarm` task triggers (Job 2, `run_if=AT_LEAST_ONE_FAILED`)
+2. **Manual**: Standalone swarm job `PC_Insurance_Autonomous_Swarm` (ID: `774564996988013`)
+3. **Interactive**: Supervisor Agent chat routes to `workspace-actions` MCP tool
+
+### Implementation
+
+**Notebook**: `swarm/PC_Insurance_Autonomous_Agent_Swarm.py` (24 cells)
+
+---
+
 ## Data Flow
 
 ### End-to-End Pipeline Flow
@@ -371,8 +412,8 @@ The project uses 2 jobs with distinct purposes:
 
 | Job | Name | ID | Purpose |
 |---|---|---|---|
-| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only (run once): MLflow models, serving endpoints, Genie Spaces, Knowledge Assistant, Supervisor Agent |
-| 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold with `load_type` parameter (INITIAL or INCREMENTAL) |
+| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only (run once): 9 tasks — 5 parallel agent setups + swarm setup + DQ functions setup + toolkit functions setup + dependent Supervisor Agent setup |
+| 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold -> autonomous_swarm (on failure) with `load_type` parameter (INITIAL or INCREMENTAL) |
 
 **Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app.
 
@@ -386,6 +427,7 @@ The project uses 2 jobs with distinct purposes:
 1. **Bronze_Pipeline** (15 min) — Ingest data, write to Bronze tables, no dependencies
 2. **Silver_Pipeline_Metadata** (30 min) — Depends on Bronze. Read metadata config, execute transformations, apply SCD2, write audit logs, run reconciliation
 3. **Gold_Pipeline** (15 min) — Depends on Silver. Read metric config, execute aggregations, calculate business metrics, write audit logs, track DQ scores
+4. **autonomous_swarm** (30 min) — Depends on all 3, `run_if=AT_LEAST_ONE_FAILED`. Triggers the LangGraph swarm on pipeline failure with `run_id={{job.run_id}}`
 
 **Load Types**: `INITIAL` (first-time full load) or `INCREMENTAL` (default, for scheduled runs)
 
@@ -396,6 +438,42 @@ The project uses 2 jobs with distinct purposes:
 The Supervisor Agent can trigger pipeline notebooks on-demand through the MCP app's `run_notebook` tool. No separate orchestrator job is needed -- the Supervisor Agent + MCP app provide direct workspace execution capabilities.
 
 **Notebook**: `pipelines/Orchestrator.py` (optional helper for manual multi-layer runs)
+
+---
+
+## UC Toolkit Functions
+
+All 7 toolkit functions are **persistent SQL UC functions** in `pc_insurance_dev.metadata`, available in every session without re-registration.
+
+### SQL Functions (Query UC tables directly)
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `read_mapping_document` | `x_center`, `layer` | JSON mapping | Retrieves active mapping JSON from `mapping_documents` table |
+| `get_pipeline_error_log` | `run_id` | JSON lineage | Retrieves lineage from `system.access.table_lineage` for a given run |
+
+### SQL Functions (Generate execution plans)
+
+These functions return JSON execution plans using `to_json(named_struct(...))`. The swarm notebook's Python functions execute these plans using `spark.sql()`, `dbutils`, and the Databricks SDK.
+
+| Function | Parameters | Returns JSON plan for |
+|---|---|---|
+| `update_mapping_document` | `x_center`, `layer`, `update_payload` | UPDATE statement to deactivate old mapping |
+| `execute_sandbox_metadata_run` | `x_center`, `staging_catalog` | CREATE CATALOG/SCHEMA/TABLE DDL for sandbox |
+| `update_uc_catalog_comments` | `table_name`, `column_comments` | COMMENT ON COLUMN statements |
+| `write_technical_markdown_doc` | `file_path`, `content` | `dbutils.fs.put()` command for UC volume |
+| `trigger_pipeline_repair` | `run_id` | `w.jobs.repair_run()` SDK command |
+
+### Registration
+
+Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.py` (job task `toolkit_functions_setup`). All use `CREATE OR REPLACE FUNCTION ... RETURN to_json(named_struct(...))` syntax.
+
+### DQ Functions (`pc_insurance.dq`)
+
+7 DQ SQL functions registered by `swarm/PC_Insurance_DQ_Functions_Setup.py` (job task `dq_functions_setup`):
+
+- `check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`
+- `calculate_dq_score(total_records, failed_records)` — returns 0.0–1.0 DQ score
 
 ---
 
@@ -514,6 +592,6 @@ The P&C Insurance Medallion Architecture provides:
 
 ---
 
-**Document Version**: 3.0  
-**Last Updated**: 2026-09-25  
+**Document Version**: 4.0  
+**Last Updated**: 2026-09-28  
 **Maintained By**: Data Engineering Team

@@ -420,20 +420,24 @@ The project uses 2 jobs with distinct purposes:
 
 | Job | Name | ID | Purpose |
 |---|---|---|---|
-| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only: registers MLflow models, creates serving endpoints, Genie Spaces, Knowledge Assistant, and Supervisor Agent |
-| 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold with sequential dependencies, parameterized by `load_type` (INITIAL or INCREMENTAL) |
+| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only: 9 tasks — 5 parallel agent setups + swarm setup + DQ functions setup + toolkit functions setup + dependent Supervisor Agent setup |
+| 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold -> autonomous_swarm (on failure), parameterized by `load_type` (INITIAL or INCREMENTAL) |
 
 **Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app. The pipeline is NOT hardcoded in the agent setup job.
 
 #### Phase 4a: Agent Setup Job (Job 1)
 
-Job 1 (`PC_Insurance_Agent_Setup`) runs 5 tasks -- 4 in parallel, then 1 dependent:
+Job 1 (`PC_Insurance_Agent_Setup`) runs 9 tasks — 8 in parallel, then 1 dependent:
 
 1. `architect_agent` -- Registers Architect MLflow model + serving endpoint (parallel)
 2. `data_engineer_agent` -- Registers Data Engineer MLflow model + serving endpoint (parallel)
 3. `domain_expert_setup` -- Creates UC volume + Knowledge Assistant (parallel)
 4. `analyst_genie_setup` -- Adds Gold table comments + creates Analyst Genie Space (parallel)
-5. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-4 complete)
+5. `swarm_setup` -- Provisions swarm infrastructure: UC catalog/schema, mapping tables, threshold controls, baseline seed data, LLM endpoint validation (parallel)
+6. `dq_functions_setup` -- Registers 7 DQ SQL functions in `pc_insurance.dq` (parallel)
+7. `toolkit_functions_setup` -- Registers 7 UC toolkit SQL functions in `pc_insurance_dev.metadata` (parallel)
+8. `mcp_app_deploy` -- Deploys MCP app `pc-insurance-workspace-actions` (parallel)
+9. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-8 complete)
 
 Run manually after Phase 1 (UC setup) and Phase 5 Step 1 (DQ functions) are complete:
 
@@ -444,11 +448,12 @@ databricks jobs run-now 820361677269451
 
 #### Phase 4b: Data Pipeline Job (Job 2)
 
-Job 2 (`PC_Insurance_Data_Pipeline`) runs 3 tasks sequentially:
+Job 2 (`PC_Insurance_Data_Pipeline`) runs 4 tasks:
 
 1. `bronze_pipeline` -- Bronze layer ingestion (parameter: `load_type=INITIAL` or `INCREMENTAL`)
 2. `silver_pipeline` -- Silver layer transformation (depends on bronze, same parameter)
 3. `gold_pipeline` -- Gold layer KPI aggregation (depends on silver)
+4. `autonomous_swarm` -- Triggers LangGraph swarm on failure (depends on all 3, `run_if=AT_LEAST_ONE_FAILED`)
 
 **Initial load** (first time):
 ```bash
@@ -608,12 +613,14 @@ The project includes a **Supervisor Agent** that orchestrates 8 specialized tool
 The setup must follow this exact order due to dependencies:
 
 1. **DQ Functions** (no dependencies — only needs UC schema)
-2. **Domain Expert** (needs UC volume + reference documents)
-3. **Genie Spaces** (needs Gold tables + project_documentation table populated)
-4. **MLflow Models + Serving Endpoints** (needs agent notebooks in repo)
-5. **MCP App** (needs app code in repo + SQL warehouse)
-6. **Supervisor Agent** (needs ALL of the above — registers them as tools)
-7. **Validation** (needs Supervisor Agent endpoint)
+2. **UC Toolkit Functions** (no dependencies — only needs UC schema, runs in parallel with DQ functions)
+3. **Swarm Infrastructure** (provisions mapping tables, threshold controls, baseline data — runs in parallel)
+4. **Domain Expert** (needs UC volume + reference documents)
+5. **Genie Spaces** (needs Gold tables + project_documentation table populated)
+6. **MLflow Models + Serving Endpoints** (needs agent notebooks in repo)
+7. **MCP App** (needs app code in repo + SQL warehouse)
+8. **Supervisor Agent** (needs ALL of the above — registers them as tools)
+9. **Validation** (needs Supervisor Agent endpoint)
 
 ---
 
@@ -686,6 +693,56 @@ COMMENT 'DQ Score: Returns the percentage of records that passed validation (0.0
 ```sql
 USE CATALOG pc_insurance;
 SHOW FUNCTIONS IN dq;
+-- Expected: 7 functions listed
+```
+
+---
+
+### Step 1b: Create UC Toolkit Functions for Autonomous Swarm (10 minutes)
+
+The 7 UC toolkit functions live in `pc_insurance_dev.metadata`. They are **persistent SQL functions** that return JSON execution plans. All use `to_json(named_struct(...))` syntax — no Python UDFs needed.
+
+Run the notebook `swarm/PC_Insurance_Toolkit_Functions_Registration.py` or execute the SQL directly:
+
+```sql
+USE CATALOG pc_insurance_dev;
+USE SCHEMA metadata;
+
+-- 1. read_mapping_document: Query function (returns mapping JSON)
+CREATE OR REPLACE FUNCTION read_mapping_document(x_center STRING, layer STRING)
+RETURNS STRING
+COMMENT 'UC Toolkit: Retrieves active mapping JSON from mapping_documents table'
+RETURN (
+  SELECT mapping_json FROM mapping_documents
+  WHERE x_center = read_mapping_document.x_center
+    AND layer = read_mapping_document.layer
+    AND is_active = true
+  ORDER BY version DESC LIMIT 1
+);
+
+-- 2. get_pipeline_error_log: Query function (returns lineage/error data)
+CREATE OR REPLACE FUNCTION get_pipeline_error_log(run_id STRING)
+RETURNS STRING
+COMMENT 'UC Toolkit: Retrieves lineage from system.access.table_lineage'
+RETURN (
+  SELECT CONCAT('{"run_id": "', run_id, '",',
+  '"source": "', COALESCE(MAX(source_table_full_name), ''), '",',
+  '"target": "', COALESCE(MAX(target_table_full_name), ''), '"}')
+  FROM system.access.table_lineage WHERE entity_run_id = run_id LIMIT 1
+);
+
+-- 3-7: Plan-generating functions (similar pattern)
+-- update_mapping_document, execute_sandbox_metadata_run, update_uc_catalog_comments,
+-- write_technical_markdown_doc, trigger_pipeline_repair
+-- (See swarm/PC_Insurance_Toolkit_Functions_Registration.py for full definitions)
+```
+
+> **Note**: Python `LANGUAGE PYTHON` UDFs return NULL on this workspace. All 7 functions are implemented as SQL functions using `to_json(named_struct(...))`. The swarm agent calls these functions to generate execution plans that the Plan Executor runs.
+
+**Verify:**
+```sql
+USE CATALOG pc_insurance_dev;
+SHOW USER FUNCTIONS IN metadata;
 -- Expected: 7 functions listed
 ```
 
@@ -1146,7 +1203,7 @@ When deploying to another environment via DAB, update these variables in `databr
 | Variable | Description | Example Value |
 |---|---|---|
 | `sql_warehouse_id` | SQL warehouse ID for MCP app statement execution | `670b9d31fd290bb2` |
-| `supervisor_endpoint` | Supervisor Agent serving endpoint name | `mas-05a49b97-endpoint` |
+| `supervisor_endpoint` | Supervisor Agent serving endpoint name | `mas-3fcb11f6-endpoint` |
 | `workspace_root` | Workspace root path for the supervisor | `/Users/<your-email>/InsuranceModel` |
 | `allowed_roots` | Comma-separated allowed root paths | `/Users/<your-email>/InsuranceModel,/Repos/<your-user>/pc-insurance-medallion` |
 | `repo_path` | Databricks Git folder path | `/Repos/<your-user>/pc-insurance-medallion` |

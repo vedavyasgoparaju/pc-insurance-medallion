@@ -14,18 +14,27 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Gold metric configuration** defining KPI sources, dimensions, formulas, grain, and refresh order
 - **Both INITIAL and INCREMENTAL load** patterns supported
 
-## Recent Changes (2026-09-25)
+## Recent Changes (2026-09-28)
 
-### Repository Restructuring
-- **New folder hierarchy**: `pipelines/`, `agents/`, `app/`, `execution/`, `utils/`, `sql/`, `docs/`
+### All 7 UC Toolkit Functions Now Persistent SQL Functions
+- Replaced 5 session-scoped Python UDFs with **persistent UC SQL functions** using `to_json(named_struct(...))`
+- All 7 toolkit functions in `pc_insurance_dev.metadata` are now SQL-based and available in every session without re-registration
+- Python `LANGUAGE PYTHON` UDFs return NULL on this workspace — SQL functions are the correct approach
+
+### Agent Setup Job Expanded (7 → 9 Tasks)
+- Added `dq_functions_setup` task: Registers 7 DQ SQL functions in `pc_insurance.dq`
+- Added `toolkit_functions_setup` task: Registers 7 UC toolkit SQL functions in `pc_insurance_dev.metadata`
+- Supervisor Agent setup now depends on all 8 parallel tasks
+
+### MCP App UNAVAILABLE State Fix
+- `MCP_App_Deploy.py` now handles `UNAVAILABLE` app state (previously only handled `STOPPED`)
+- When platform stops app compute, the deploy notebook starts and redeploys automatically
+
+### Repository Restructuring (2026-09-25)
+- **New folder hierarchy**: `pipelines/`, `agents/`, `app/`, `execution/`, `utils/`, `sql/`, `docs/`, `swarm/`
 - **Removed:** `Silver_Pipeline.py` (obsolete), `Git_Automation.py` (replaced by MCP app), `CLEANUP_SUMMARY.md`, `CLEANUP_FINAL_REPORT.txt`, `tools/`, `resources/`, `.vscode/`, `InsuranceModel_Architecture_Guide.pdf`
 - **Active:** `Silver_Pipeline_Metadata.py` (metadata-driven framework)
 - **MCP App:** `app/app.py` — `pc-insurance-workspace-actions` handles git commits, file writes, and SQL execution via subprocess git CLI
-
-### Documentation Consolidation (2026-09-25)
-- Merged `ARCHITECTURE.md` + `InsuranceModel_Architecture_Guide.md` → single `docs/ARCHITECTURE.md`
-- Merged `Getting_Started.md` + `Git_Automation_Guide.md` + `DEPLOYMENT.md` → single `docs/DEPLOYMENT.md`
-- Deleted 3 redundant files; docs reduced from 7 to 4 files
 
 ## Architecture
 
@@ -86,7 +95,8 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 8 tools (7 su
 7. **DevOps** (genie_space) - Git/CI-CD GUIDANCE ONLY (no execution)
 8. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`) - EXECUTES workspace changes (git commits, file writes, SQL)
 
-**Supervisor Endpoint**: `mas-05a49b97-endpoint` (READY)
+**Supervisor Endpoint**: `mas-3fcb11f6-endpoint` (READY)
+**Supervisor Agent ID**: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`
 
 ### Anti-Routing Rules
 
@@ -114,7 +124,13 @@ pc-insurance-medallion/
 │   ├── Domain_Expert_Setup.py       # UC volume with P&C reference docs
 │   ├── Analyst_Genie_Agent.py       # Analyst agent setup
 │   ├── Analyst_Genie_Setup.py       # Genie Space over Gold tables
-│   └── Supervisor_Agent_Setup.py    # Multi-agent orchestration setup
+│   ├── Supervisor_Agent_Setup.py    # Multi-agent orchestration setup
+│   ├── MCP_App_Deploy.py           # MCP app deployment (handles STOPPED + UNAVAILABLE)
+├── swarm/
+│   ├── PC_Insurance_Autonomous_Agent_Swarm.py   # LangGraph swarm (6 agents, Plan-Execute-Verify-Deploy)
+│   ├── PC_Insurance_Swarm_Setup.py              # Swarm infrastructure provisioning
+│   ├── PC_Insurance_DQ_Functions_Setup.py       # 7 DQ SQL functions in pc_insurance.dq
+│   └── PC_Insurance_Toolkit_Functions_Registration.py  # 7 UC toolkit SQL functions
 ├── app/
 │   ├── app.py                      # MCP server (pc-insurance-workspace-actions)
 │   ├── app.yaml                    # Databricks App config
@@ -171,9 +187,11 @@ pc-insurance-medallion/
    ```
    Or run notebooks individually: Bronze (`load_type=INITIAL`) -> Silver (`load_type=INITIAL`) -> Gold
 6. **For incremental loads** (default): `databricks jobs run-now 894776717783668`
-8. **Setup Agents**: Run agent setup notebooks in `agents/`
-9. **Deploy MCP App**: Deploy `app/` as `pc-insurance-workspace-actions`
-10. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
+7. **Run Agent Setup Job** (9 tasks — all agents, DQ functions, toolkit functions, MCP app, Supervisor Agent):
+   ```bash
+   databricks jobs run-now 820361677269451
+   ```
+8. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
 
 > **See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed step-by-step deployment instructions**, including environment setup, agent deployment, MCP app configuration, post-deployment validation, rollback procedures, and troubleshooting.
 
