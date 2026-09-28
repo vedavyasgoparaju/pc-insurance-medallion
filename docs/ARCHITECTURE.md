@@ -333,16 +333,16 @@ The swarm uses a **Plan-Execute-Verify-Deploy** loop with 6 specialized agents:
 
 1. **Supervisor** — Orchestrates the swarm, assigns tasks (Llama 3.3 70B)
 2. **Triage** — Fetches real error logs via `jobs.get_run()` and `jobs.get_run_output()`
-3. **Business Analyst** — Updates mapping metadata in `pc_insurance_dev.metadata.mapping_documents`
+3. **Business Analyst** — Updates mapping metadata in `pc_insurance.metadata.mapping_documents`
 4. **Data Engineer** — Applies schema/code fixes using the toolkit functions
 5. **QA** — Validates fixes using `pc_insurance.dq.calculate_dq_score`
 6. **Deployment** — Triggers pipeline repair via `jobs.repair_run()`
 
 ### Metadata Catalog
 
-- **Catalog**: `pc_insurance_dev.metadata`
+- **Catalog**: `pc_insurance.metadata`
 - **Tables**: `mapping_documents` (7 rows, ACORD-standard mappings), `threshold_controls` (4 rows, KPI thresholds with CAT event overrides)
-- **UC Volume**: `pc_insurance_dev.metadata.technical_docs` with subdirs: `post_mortems`, `schema_docs`, `escalations`
+- **UC Volume**: `pc_insurance.metadata.technical_docs` with subdirs: `post_mortems`, `schema_docs`, `escalations`
 
 ### Guardrails
 
@@ -434,9 +434,9 @@ The project uses 2 jobs with distinct purposes:
 | 2 | `data_engineer_agent` | Registers the Data Engineer Agent as an MLflow pyfunc model, creates serving endpoint `pc_data_engineer_agent` (Small workload, scale-to-zero) | 10 min |
 | 3 | `domain_expert_setup` | Creates UC volume `pc_insurance.reference.pc_domain_docs`, uploads P&C domain documents, creates a Knowledge Assistant (Instructed Retriever) over the volume | 10 min |
 | 4 | `analyst_genie_setup` | Adds column-level comments to all Gold layer tables for Genie, creates Genie Space `PC_Insurance_Analyst` with all 6 Gold tables and example queries | 10 min |
-| 5 | `swarm_setup` | Provisions swarm infrastructure: creates `pc_insurance_dev` catalog + `metadata` schema, creates `mapping_documents` and `threshold_controls` tables, seeds baseline data, validates LLM endpoint availability | 10 min |
+| 5 | `swarm_setup` | Provisions swarm infrastructure: creates `pc_insurance` catalog + `metadata` schema, creates `mapping_documents` and `threshold_controls` tables, seeds baseline data, validates LLM endpoint availability | 10 min |
 | 6 | `dq_functions_setup` | Registers 7 persistent DQ SQL functions in `pc_insurance.dq` via `swarm/PC_Insurance_DQ_Functions_Setup.py` (`check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`, `calculate_dq_score`) | 5 min |
-| 7 | `toolkit_functions_setup` | Registers 7 persistent UC toolkit SQL functions in `pc_insurance_dev.metadata` via `swarm/PC_Insurance_Toolkit_Functions_Registration.py` (all use `to_json(named_struct(...))` syntax) | 5 min |
+| 7 | `toolkit_functions_setup` | Registers 7 persistent UC toolkit SQL functions in `pc_insurance.metadata` via `swarm/PC_Insurance_Toolkit_Functions_Registration.py` (all use `to_json(named_struct(...))` syntax) | 5 min |
 | 8 | `mcp_app_deploy` | Deploys the MCP app `pc-insurance-workspace-actions` from `app/app.py`, configures SQL warehouse, service principal, and secret scope access | 10 min |
 
 #### Dependent Task (9)
@@ -475,7 +475,7 @@ The Supervisor Agent can trigger pipeline notebooks on-demand through the MCP ap
 
 ## UC Toolkit Functions
 
-All 7 toolkit functions are **persistent SQL UC functions** in `pc_insurance_dev.metadata`, available in every session without re-registration.
+All 7 toolkit functions are **persistent SQL UC functions** in `pc_insurance.metadata`, available in every session without re-registration.
 
 ### SQL Functions (Query UC tables directly)
 
@@ -533,7 +533,7 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 
 | Environment | Catalog | Git Branch | Purpose |
 |---|---|---|---|
-| Development | `pc_insurance_dev` | `feature/*` or `dev` | Development and testing |
+| Development | `pc_insurance` | `feature/*` or `dev` | Development and testing |
 | Main (Dev) | `pc_insurance` | `main` | Active development environment |
 
 > **Note**: Only the `dev` environment is currently active. Only the `dev` environment is currently active. See [DEPLOYMENT.md](DEPLOYMENT.md) for multi-environment guidance.
@@ -546,7 +546,7 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 databricks bundle deploy -t dev
 ```
 
-> Only the `dev` target is currently defined. Only the `dev` target is currently defined.
+> Only the `dev` target is currently defined.
 
 ### CI/CD Pipeline
 

@@ -104,13 +104,13 @@ SUBAGENT_LLM_ENDPOINT   = "databricks-meta-llama-3-1-8b-instruct"
 SERVERLESS_WAREHOUSE_ID = os.environ.get("PC_INSURANCE_WAREHOUSE_ID", "")
 
 # Unity Catalog metadata store locations
-METADATA_CATALOG    = "pc_insurance_dev"
+METADATA_CATALOG    = "pc_insurance"
 METADATA_SCHEMA     = "metadata"
 CATALOG        = "pc_insurance"
 SANDBOX_CATALOG_PREFIX = "dev_sandbox_"
 
 # Documentation volume path (UC Volume)
-DOCS_VOLUME_PATH = "/Volumes/pc_insurance_dev/metadata/technical_docs"
+DOCS_VOLUME_PATH = "/Volumes/pc_insurance/metadata/technical_docs"
 
 # Git configuration for metadata + docs sync
 GIT_REPO_URL = os.environ.get("PC_GIT_REPO_URL", "")
@@ -140,21 +140,21 @@ logger = logging.getLogger("PC_AgentSwarm")
 
 # DBTITLE 1,Infrastructure Setup & Seeding
 # Cell 2b: Infrastructure Setup — Catalog, Tables, Volume, Seeding
-# Creates the full pc_insurance_dev infrastructure.
+# Creates the full pc_insurance infrastructure.
 
 import json
 import datetime
 
-print("Creating pc_insurance_dev infrastructure...")
+print("Creating pc_insurance infrastructure...")
 
 # 1. Catalog + Schema
-spark.sql("CREATE CATALOG IF NOT EXISTS pc_insurance_dev")
-spark.sql("CREATE SCHEMA IF NOT EXISTS pc_insurance_dev.metadata")
+spark.sql("CREATE CATALOG IF NOT EXISTS pc_insurance")
+spark.sql("CREATE SCHEMA IF NOT EXISTS pc_insurance.metadata")
 print("Catalog + schema created")
 
 # 2. mapping_documents table
 spark.sql("""
-    CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.mapping_documents (
+    CREATE TABLE IF NOT EXISTS pc_insurance.metadata.mapping_documents (
         x_center STRING NOT NULL,
         layer STRING NOT NULL,
         version INT NOT NULL,
@@ -170,7 +170,7 @@ print("mapping_documents table created")
 
 # 3. threshold_controls table
 spark.sql("""
-    CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.threshold_controls (
+    CREATE TABLE IF NOT EXISTS pc_insurance.metadata.threshold_controls (
         metric_name STRING NOT NULL,
         region STRING,
         event_type STRING,
@@ -186,11 +186,11 @@ spark.sql("""
 print("threshold_controls table created")
 
 # 4. UC Volume for technical docs
-spark.sql("CREATE VOLUME IF NOT EXISTS pc_insurance_dev.metadata.technical_docs")
+spark.sql("CREATE VOLUME IF NOT EXISTS pc_insurance.metadata.technical_docs")
 try:
-    dbutils.fs.mkdirs("/Volumes/pc_insurance_dev/metadata/technical_docs/post_mortems")
-    dbutils.fs.mkdirs("/Volumes/pc_insurance_dev/metadata/technical_docs/schema_docs")
-    dbutils.fs.mkdirs("/Volumes/pc_insurance_dev/metadata/technical_docs/escalations")
+    dbutils.fs.mkdirs("/Volumes/pc_insurance/metadata/technical_docs/post_mortems")
+    dbutils.fs.mkdirs("/Volumes/pc_insurance/metadata/technical_docs/schema_docs")
+    dbutils.fs.mkdirs("/Volumes/pc_insurance/metadata/technical_docs/escalations")
 except Exception as e:
     print("  (subdir creation note: " + str(e) + ")")
 print("UC Volume + subdirectories created")
@@ -322,7 +322,7 @@ baseline_mappings = {
 now_ts = datetime.datetime.now().isoformat()
 for (x_center, layer), mapping_content in baseline_mappings.items():
     existing = spark.sql(
-        "SELECT COUNT(*) as cnt FROM pc_insurance_dev.metadata.mapping_documents " +
+        "SELECT COUNT(*) as cnt FROM pc_insurance.metadata.mapping_documents " +
         "WHERE x_center = '" + x_center + "' AND layer = '" + layer + "'"
     ).collect()[0]["cnt"]
     
@@ -330,7 +330,7 @@ for (x_center, layer), mapping_content in baseline_mappings.items():
         mapping_json = json.dumps(mapping_content, indent=2, sort_keys=True).replace("'", "''")
         biz_desc = mapping_content["business_description"].replace("'", "''")
         insert_sql = (
-            "INSERT INTO pc_insurance_dev.metadata.mapping_documents " +
+            "INSERT INTO pc_insurance.metadata.mapping_documents " +
             "(x_center, layer, version, is_active, mapping_json, business_description, updated_by, updated_at) " +
             "VALUES ('" + x_center + "', '" + layer + "', 1, true, '" +
             mapping_json + "', '" + biz_desc + "', 'system_init', '" + now_ts + "')"
@@ -352,7 +352,7 @@ for metric, region, event, max_t, min_t, start_d, end_d, updated_by in threshold
     region_clause = "AND region = '" + region + "'" if region else "AND region IS NULL"
     event_clause = "AND event_type = '" + event + "'" if event else "AND event_type IS NULL"
     existing = spark.sql(
-        "SELECT COUNT(*) as cnt FROM pc_insurance_dev.metadata.threshold_controls " +
+        "SELECT COUNT(*) as cnt FROM pc_insurance.metadata.threshold_controls " +
         "WHERE metric_name = '" + metric + "' " + region_clause + " " + event_clause
     ).collect()[0]["cnt"]
     
@@ -362,7 +362,7 @@ for metric, region, event, max_t, min_t, start_d, end_d, updated_by in threshold
         start_val = "DATE('" + start_d + "')" if start_d else "NULL"
         end_val = "DATE('" + end_d + "')" if end_d else "NULL"
         insert_sql = (
-            "INSERT INTO pc_insurance_dev.metadata.threshold_controls " +
+            "INSERT INTO pc_insurance.metadata.threshold_controls " +
             "(metric_name, region, event_type, max_threshold, min_threshold, " +
             "effective_start_date, effective_end_date, is_active, updated_by, updated_at) " +
             "VALUES ('" + metric + "', " + region_val + ", " + event_val + ", " +
@@ -376,15 +376,15 @@ for metric, region, event, max_t, min_t, start_d, end_d, updated_by in threshold
 
 # Verify
 print("\n-- Infrastructure Verification --")
-mapping_count = spark.sql("SELECT COUNT(*) as cnt FROM pc_insurance_dev.metadata.mapping_documents").collect()[0]["cnt"]
-threshold_count = spark.sql("SELECT COUNT(*) as cnt FROM pc_insurance_dev.metadata.threshold_controls").collect()[0]["cnt"]
+mapping_count = spark.sql("SELECT COUNT(*) as cnt FROM pc_insurance.metadata.mapping_documents").collect()[0]["cnt"]
+threshold_count = spark.sql("SELECT COUNT(*) as cnt FROM pc_insurance.metadata.threshold_controls").collect()[0]["cnt"]
 print("  mapping_documents: " + str(mapping_count) + " rows")
 print("  threshold_controls: " + str(threshold_count) + " rows")
 
 print("\n-- Mapping Documents Summary --")
 display(spark.sql("""
     SELECT x_center, layer, version, is_active, updated_by, updated_at
-    FROM pc_insurance_dev.metadata.mapping_documents
+    FROM pc_insurance.metadata.mapping_documents
     ORDER BY x_center, layer, version
 """))
 
@@ -392,11 +392,11 @@ print("\n-- Threshold Controls --")
 display(spark.sql("""
     SELECT metric_name, region, event_type, max_threshold, min_threshold,
            effective_start_date, effective_end_date, is_active
-    FROM pc_insurance_dev.metadata.threshold_controls
+    FROM pc_insurance.metadata.threshold_controls
     ORDER BY metric_name, region
 """))
 
-print("\npc_insurance_dev infrastructure setup complete!")
+print("\npc_insurance infrastructure setup complete!")
 
 # COMMAND ----------
 
@@ -632,7 +632,7 @@ def read_mapping_document(x_center: str, layer: str) -> dict:
     metadata store.
 
     The mapping document is stored as a Delta table:
-        pc_insurance_dev.metadata.mapping_documents
+        pc_insurance.metadata.mapping_documents
 
     Schema:
         x_center STRING, layer STRING, version INT, is_active BOOLEAN,
@@ -2563,7 +2563,7 @@ def simulate_scenario_c() -> dict:
         "transformation_rules": [{
             "rule_name": "catastrophic_event_threshold_override",
             "rule_type": "conditional",
-            "rule_sql": "UPDATE pc_insurance_dev.metadata.threshold_controls SET max_loss_ratio = 600 WHERE metric_name = 'loss_ratio' AND region = 'FLORIDA' AND event_type = 'CATASTROPHIC'",
+            "rule_sql": "UPDATE pc_insurance.metadata.threshold_controls SET max_loss_ratio = 600 WHERE metric_name = 'loss_ratio' AND region = 'FLORIDA' AND event_type = 'CATASTROPHIC'",
             "applies_to": "loss_ratio",
             "condition": "region = 'FLORIDA' AND event_type = 'CATASTROPHIC' AND event_date BETWEEN '2026-09-20' AND '2026-09-25'"
         }],
@@ -2755,7 +2755,7 @@ UC_FUNCTION_DDL = '''
 -- ────────────────────────────────────────────────────────────
 -- Unity Catalog AI Function: get_pipeline_error_log
 -- ────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION pc_insurance_dev.metadata.get_pipeline_error_log(run_id STRING)
+CREATE OR REPLACE FUNCTION pc_insurance.metadata.get_pipeline_error_log(run_id STRING)
 RETURNS STRING
 LANGUAGE PYTHON
 RETURN {
@@ -2781,14 +2781,14 @@ RETURN {
 -- ────────────────────────────────────────────────────────────
 -- Unity Catalog AI Function: read_mapping_document
 -- ────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION pc_insurance_dev.metadata.read_mapping_document(x_center STRING, layer STRING)
+CREATE OR REPLACE FUNCTION pc_insurance.metadata.read_mapping_document(x_center STRING, layer STRING)
 RETURNS STRING
 LANGUAGE PYTHON
 RETURN {
     import json
     query = f""""
         SELECT mapping_json, business_description, version
-        FROM pc_insurance_dev.metadata.mapping_documents
+        FROM pc_insurance.metadata.mapping_documents
         WHERE x_center = '{x_center}' AND layer = '{layer}' AND is_active = true
         ORDER BY version DESC LIMIT 1
     """
@@ -2808,7 +2808,7 @@ RETURN {
 -- ────────────────────────────────────────────────────────────
 -- Unity Catalog AI Function: update_uc_catalog_comments
 -- ────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION pc_insurance_dev.metadata.update_uc_catalog_comments(
+CREATE OR REPLACE FUNCTION pc_insurance.metadata.update_uc_catalog_comments(
     table_name STRING, column_comments STRING
 )
 RETURNS STRING
@@ -2830,7 +2830,7 @@ RETURN {
 -- ────────────────────────────────────────────────────────────
 -- Unity Catalog AI Function: trigger_pipeline_repair
 -- ────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION pc_insurance_dev.metadata.trigger_pipeline_repair(run_id STRING)
+CREATE OR REPLACE FUNCTION pc_insurance.metadata.trigger_pipeline_repair(run_id STRING)
 RETURNS STRING
 LANGUAGE PYTHON
 RETURN {
@@ -2844,10 +2844,10 @@ RETURN {
 -- ────────────────────────────────────────────────────────────
 -- Metadata Tables (DDL for initial setup)
 -- ────────────────────────────────────────────────────────────
-CREATE CATALOG IF NOT EXISTS pc_insurance_dev;
-CREATE SCHEMA IF NOT EXISTS pc_insurance_dev.metadata;
+CREATE CATALOG IF NOT EXISTS pc_insurance;
+CREATE SCHEMA IF NOT EXISTS pc_insurance.metadata;
 
-CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.mapping_documents (
+CREATE TABLE IF NOT EXISTS pc_insurance.metadata.mapping_documents (
     x_center STRING NOT NULL,
     layer STRING NOT NULL,
     version INT NOT NULL,
@@ -2859,7 +2859,7 @@ CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.mapping_documents (
 ) USING DELTA
 PARTITIONED BY (x_center, layer);
 
-CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.threshold_controls (
+CREATE TABLE IF NOT EXISTS pc_insurance.metadata.threshold_controls (
     metric_name STRING NOT NULL,
     region STRING,
     event_type STRING,
@@ -2873,21 +2873,21 @@ CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.threshold_controls (
 ) USING DELTA;
 
 -- UC Volume for technical documentation
-CREATE VOLUME IF NOT EXISTS pc_insurance_dev.metadata.technical_docs;
+CREATE VOLUME IF NOT EXISTS pc_insurance.metadata.technical_docs;
 '''
 
 print("UC Function Deployment DDL generated.")
 print("Run the SQL above in a SQL notebook or the Databricks SQL editor to deploy.")
 print("\nFunctions defined:")
-print("  - pc_insurance_dev.metadata.get_pipeline_error_log(run_id)")
-print("  - pc_insurance_dev.metadata.read_mapping_document(x_center, layer)")
-print("  - pc_insurance_dev.metadata.update_uc_catalog_comments(table_name, column_comments)")
-print("  - pc_insurance_dev.metadata.trigger_pipeline_repair(run_id)")
+print("  - pc_insurance.metadata.get_pipeline_error_log(run_id)")
+print("  - pc_insurance.metadata.read_mapping_document(x_center, layer)")
+print("  - pc_insurance.metadata.update_uc_catalog_comments(table_name, column_comments)")
+print("  - pc_insurance.metadata.trigger_pipeline_repair(run_id)")
 print("\nTables defined:")
-print("  - pc_insurance_dev.metadata.mapping_documents")
-print("  - pc_insurance_dev.metadata.threshold_controls")
+print("  - pc_insurance.metadata.mapping_documents")
+print("  - pc_insurance.metadata.threshold_controls")
 print("\nVolume defined:")
-print("  - pc_insurance_dev.metadata.technical_docs")
+print("  - pc_insurance.metadata.technical_docs")
 
 # COMMAND ----------
 
@@ -3238,12 +3238,12 @@ print("=" * 70)
 # 1. Catalog & Schema
 print("\n-- 1. Catalog & Schema --")
 try:
-    spark.sql("USE CATALOG pc_insurance_dev")
-    chk("Metadata catalog pc_insurance_dev", True)
+    spark.sql("USE CATALOG pc_insurance")
+    chk("Metadata catalog pc_insurance", True)
 except Exception as e:
-    chk("Metadata catalog pc_insurance_dev", False, str(e)[:80])
+    chk("Metadata catalog pc_insurance", False, str(e)[:80])
 try:
-    spark.sql("USE pc_insurance_dev.metadata")
+    spark.sql("USE pc_insurance.metadata")
     chk("Schema metadata", True)
 except Exception as e:
     chk("Schema metadata", False, str(e)[:80])
@@ -3256,12 +3256,12 @@ except Exception as e:
 # 2. Metadata Tables
 print("\n-- 2. Metadata Tables --")
 try:
-    mc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance_dev.metadata.mapping_documents").collect()[0]["c"]
+    mc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance.metadata.mapping_documents").collect()[0]["c"]
     chk("mapping_documents (" + str(mc) + " rows)", mc > 0)
 except Exception as e:
     chk("mapping_documents", False, str(e)[:80])
 try:
-    tc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance_dev.metadata.threshold_controls").collect()[0]["c"]
+    tc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance.metadata.threshold_controls").collect()[0]["c"]
     chk("threshold_controls (" + str(tc) + " rows)", tc > 0)
 except Exception as e:
     chk("threshold_controls", False, str(e)[:80])
@@ -3269,7 +3269,7 @@ except Exception as e:
 # 3. Mapping Coverage
 print("\n-- 3. Mapping Document Coverage --")
 try:
-    rows = spark.sql("SELECT x_center, layer, version FROM pc_insurance_dev.metadata.mapping_documents WHERE is_active = true ORDER BY x_center, layer").collect()
+    rows = spark.sql("SELECT x_center, layer, version FROM pc_insurance.metadata.mapping_documents WHERE is_active = true ORDER BY x_center, layer").collect()
     chk("Active mappings (" + str(len(rows)) + ")", len(rows) > 0)
     for r in rows:
         print("    " + str(r["x_center"]) + "/" + str(r["layer"]) + " (v" + str(r["version"]) + ")")
@@ -3279,7 +3279,7 @@ except Exception as e:
 # 4. Threshold Controls
 print("\n-- 4. Threshold Controls --")
 try:
-    rows = spark.sql("SELECT metric_name, region, event_type, max_threshold FROM pc_insurance_dev.metadata.threshold_controls WHERE is_active = true ORDER BY metric_name").collect()
+    rows = spark.sql("SELECT metric_name, region, event_type, max_threshold FROM pc_insurance.metadata.threshold_controls WHERE is_active = true ORDER BY metric_name").collect()
     chk("Active thresholds (" + str(len(rows)) + ")", len(rows) > 0)
     for r in rows:
         reg = r["region"] or "ALL"
@@ -3291,7 +3291,7 @@ except Exception as e:
 # 5. UC Volume
 print("\n-- 5. UC Volume --")
 try:
-    vf = dbutils.fs.ls("/Volumes/pc_insurance_dev/metadata/technical_docs")
+    vf = dbutils.fs.ls("/Volumes/pc_insurance/metadata/technical_docs")
     chk("UC Volume accessible (" + str(len(vf)) + " subdirs)", len(vf) >= 3)
 except Exception as e:
     chk("UC Volume accessible", False, str(e)[:80])

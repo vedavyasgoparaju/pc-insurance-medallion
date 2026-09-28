@@ -34,15 +34,15 @@ print("=" * 60)
 
 # ── 1. Catalog + Schema ──
 print("\n1. Catalog & Schema")
-spark.sql("CREATE CATALOG IF NOT EXISTS pc_insurance_dev")
-spark.sql("CREATE SCHEMA IF NOT EXISTS pc_insurance_dev.metadata")
-check("pc_insurance_dev catalog", True, "created/verified")
-check("pc_insurance_dev.metadata schema", True, "created/verified")
+spark.sql("CREATE CATALOG IF NOT EXISTS pc_insurance")
+spark.sql("CREATE SCHEMA IF NOT EXISTS pc_insurance.metadata")
+check("pc_insurance catalog", True, "created/verified")
+check("pc_insurance.metadata schema", True, "created/verified")
 
 # ── 2. mapping_documents table ──
 print("\n2. Metadata Tables")
 spark.sql("""
-    CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.mapping_documents (
+    CREATE TABLE IF NOT EXISTS pc_insurance.metadata.mapping_documents (
         x_center STRING NOT NULL,
         layer STRING NOT NULL,
         version INT NOT NULL,
@@ -54,12 +54,12 @@ spark.sql("""
     ) USING DELTA
     PARTITIONED BY (x_center, layer)
 """)
-map_count = spark.sql("SELECT COUNT(*) AS cnt FROM pc_insurance_dev.metadata.mapping_documents").collect()[0]["cnt"]
+map_count = spark.sql("SELECT COUNT(*) AS cnt FROM pc_insurance.metadata.mapping_documents").collect()[0]["cnt"]
 check("mapping_documents table", True, f"created/verified ({map_count} rows)")
 
 # ── 3. threshold_controls table ──
 spark.sql("""
-    CREATE TABLE IF NOT EXISTS pc_insurance_dev.metadata.threshold_controls (
+    CREATE TABLE IF NOT EXISTS pc_insurance.metadata.threshold_controls (
         metric_name STRING NOT NULL,
         region STRING,
         event_type STRING,
@@ -72,15 +72,15 @@ spark.sql("""
         updated_at TIMESTAMP
     ) USING DELTA
 """)
-thresh_count = spark.sql("SELECT COUNT(*) AS cnt FROM pc_insurance_dev.metadata.threshold_controls").collect()[0]["cnt"]
+thresh_count = spark.sql("SELECT COUNT(*) AS cnt FROM pc_insurance.metadata.threshold_controls").collect()[0]["cnt"]
 check("threshold_controls table", True, f"created/verified ({thresh_count} rows)")
 
 # ── 4. UC Volume for technical docs ──
 print("\n3. UC Volume")
-spark.sql("CREATE VOLUME IF NOT EXISTS pc_insurance_dev.metadata.technical_docs")
+spark.sql("CREATE VOLUME IF NOT EXISTS pc_insurance.metadata.technical_docs")
 for subdir in ["post_mortems", "schema_docs", "escalations"]:
     try:
-        dbutils.fs.mkdirs(f"/Volumes/pc_insurance_dev/metadata/technical_docs/{subdir}")
+        dbutils.fs.mkdirs(f"/Volumes/pc_insurance/metadata/technical_docs/{subdir}")
     except Exception:
         pass
 check("technical_docs volume + subdirs", True, "created/verified")
@@ -122,7 +122,7 @@ if map_count == 0:
     ]
     for x_center, layer, version, is_active, mapping_json, desc, updated_by, updated_at in baseline:
         spark.sql(f"""
-            INSERT INTO pc_insurance_dev.metadata.mapping_documents
+            INSERT INTO pc_insurance.metadata.mapping_documents
             (x_center, layer, version, is_active, mapping_json, business_description, updated_by, updated_at)
             VALUES ('{x_center}', '{layer}', {version}, {str(is_active).lower()},
                     '{mapping_json.replace(chr(39), chr(39)+chr(39))}',
@@ -148,7 +148,7 @@ if thresh_count == 0:
         reg_sql = f"'{region}'" if region else "NULL"
         evt_sql = f"'{event_type}'" if event_type else "NULL"
         spark.sql(f"""
-            INSERT INTO pc_insurance_dev.metadata.threshold_controls
+            INSERT INTO pc_insurance.metadata.threshold_controls
             (metric_name, region, event_type, max_threshold, min_threshold, effective_start_date, effective_end_date, is_active, updated_by, updated_at)
             VALUES ('{metric}', {reg_sql}, {evt_sql}, {max_sql}, {min_sql}, '{start_d}', {end_sql}, {str(active).lower()}, '{updated_by}', current_timestamp())
         """)

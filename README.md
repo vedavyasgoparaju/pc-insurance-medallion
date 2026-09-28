@@ -18,12 +18,12 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 
 ### All 7 UC Toolkit Functions Now Persistent SQL Functions
 - Replaced 5 session-scoped Python UDFs with **persistent UC SQL functions** using `to_json(named_struct(...))`
-- All 7 toolkit functions in `pc_insurance_dev.metadata` are now SQL-based and available in every session without re-registration
+- All 7 toolkit functions in `pc_insurance.metadata` are now SQL-based and available in every session without re-registration
 - Python `LANGUAGE PYTHON` UDFs return NULL on this workspace — SQL functions are the correct approach
 
 ### Agent Setup Job Expanded (7 → 9 Tasks)
 - Added `dq_functions_setup` task: Registers 7 DQ SQL functions in `pc_insurance.dq`
-- Added `toolkit_functions_setup` task: Registers 7 UC toolkit SQL functions in `pc_insurance_dev.metadata`
+- Added `toolkit_functions_setup` task: Registers 7 UC toolkit SQL functions in `pc_insurance.metadata`
 - Supervisor Agent setup now depends on all 8 parallel tasks
 
 ### MCP App UNAVAILABLE State Fix

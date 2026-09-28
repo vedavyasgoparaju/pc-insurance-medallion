@@ -3,14 +3,14 @@
 # MAGIC %md
 # MAGIC # PC Insurance Swarm Toolkit Functions Registration
 # MAGIC
-# MAGIC Registers 7 persistent UC SQL functions in `pc_insurance_dev.metadata`.
+# MAGIC Registers 7 persistent UC SQL functions in `pc_insurance.metadata`.
 # MAGIC All functions are SQL-based (persistent in Unity Catalog) and return JSON execution plans.
 
 # COMMAND ----------
 
 # DBTITLE 1,Set Catalog & Schema
 # MAGIC %sql
-# MAGIC USE CATALOG pc_insurance_dev;
+# MAGIC USE CATALOG pc_insurance;
 # MAGIC USE SCHEMA metadata;
 
 # COMMAND ----------
@@ -60,7 +60,7 @@
 # MAGIC   'layer', layer,
 # MAGIC   'new_mapping_json', COALESCE(get_json_object(update_payload, '$.column_mappings'), '{}'),
 # MAGIC   'sql_to_execute', array(concat(
-# MAGIC     'UPDATE pc_insurance_dev.metadata.mapping_documents SET is_active=false WHERE x_center=', quote(x_center), ' AND layer=', quote(layer), ' AND is_active=true'
+# MAGIC     'UPDATE pc_insurance.metadata.mapping_documents SET is_active=false WHERE x_center=', quote(x_center), ' AND layer=', quote(layer), ' AND is_active=true'
 # MAGIC   )),
 # MAGIC   'status', 'merge_plan_generated'
 # MAGIC ));
@@ -79,7 +79,7 @@
 # MAGIC   'sql_statements', array(
 # MAGIC     concat('CREATE CATALOG IF NOT EXISTS ', sandbox_catalog),
 # MAGIC     concat('CREATE SCHEMA IF NOT EXISTS ', sandbox_catalog, '.metadata'),
-# MAGIC     concat('CREATE TABLE IF NOT EXISTS ', sandbox_catalog, '.metadata.mapping_documents AS SELECT * FROM pc_insurance_dev.metadata.mapping_documents WHERE x_center=', quote(x_center), ' AND is_active=true')
+# MAGIC     concat('CREATE TABLE IF NOT EXISTS ', sandbox_catalog, '.metadata.mapping_documents AS SELECT * FROM pc_insurance.metadata.mapping_documents WHERE x_center=', quote(x_center), ' AND is_active=true')
 # MAGIC   ),
 # MAGIC   'status', 'sandbox_preparation_plan'
 # MAGIC ));
@@ -129,4 +129,4 @@
 # DBTITLE 1,Verify All Functions
 # MAGIC %sql
 # MAGIC -- Verify all 7 functions are registered
-# MAGIC SHOW USER FUNCTIONS IN pc_insurance_dev.metadata;
+# MAGIC SHOW USER FUNCTIONS IN pc_insurance.metadata;

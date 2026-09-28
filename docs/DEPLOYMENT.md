@@ -435,7 +435,7 @@ Job 1 (`PC_Insurance_Agent_Setup`) runs 9 tasks — 8 in parallel, then 1 depend
 4. `analyst_genie_setup` -- Adds Gold table comments + creates Analyst Genie Space (parallel)
 5. `swarm_setup` -- Provisions swarm infrastructure: UC catalog/schema, mapping tables, threshold controls, baseline seed data, LLM endpoint validation (parallel)
 6. `dq_functions_setup` -- Registers 7 DQ SQL functions in `pc_insurance.dq` (parallel)
-7. `toolkit_functions_setup` -- Registers 7 UC toolkit SQL functions in `pc_insurance_dev.metadata` (parallel)
+7. `toolkit_functions_setup` -- Registers 7 UC toolkit SQL functions in `pc_insurance.metadata` (parallel)
 8. `mcp_app_deploy` -- Deploys MCP app `pc-insurance-workspace-actions` (parallel)
 9. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-8 complete)
 
@@ -700,12 +700,12 @@ SHOW FUNCTIONS IN dq;
 
 ### Step 1b: Create UC Toolkit Functions for Autonomous Swarm (10 minutes)
 
-The 7 UC toolkit functions live in `pc_insurance_dev.metadata`. They are **persistent SQL functions** that return JSON execution plans. All use `to_json(named_struct(...))` syntax — no Python UDFs needed.
+The 7 UC toolkit functions live in `pc_insurance.metadata`. They are **persistent SQL functions** that return JSON execution plans. All use `to_json(named_struct(...))` syntax — no Python UDFs needed.
 
 Run the notebook `swarm/PC_Insurance_Toolkit_Functions_Registration.py` or execute the SQL directly:
 
 ```sql
-USE CATALOG pc_insurance_dev;
+USE CATALOG pc_insurance;
 USE SCHEMA metadata;
 
 -- 1. read_mapping_document: Query function (returns mapping JSON)
@@ -741,7 +741,7 @@ RETURN (
 
 **Verify:**
 ```sql
-USE CATALOG pc_insurance_dev;
+USE CATALOG pc_insurance;
 SHOW USER FUNCTIONS IN metadata;
 -- Expected: 7 functions listed
 ```
