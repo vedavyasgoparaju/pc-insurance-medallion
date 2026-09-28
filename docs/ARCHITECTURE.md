@@ -1,7 +1,7 @@
 # P&C Insurance Medallion Architecture
 
-**Version:** 4.0  
-**Last Updated:** 2026-09-28  
+**Version:** 4.1  
+**Last Updated:** 2026-09-29  
 **Repository:** `vedavyasgoparaju/pc-insurance-medallion`  
 **Workspace:** `https://dbc-ec4d2e3d-58c3.cloud.databricks.com`
 
@@ -31,6 +31,7 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 
 - **Medallion Architecture**: Bronze → Silver → Gold layers
 - **Multi-Agent System**: 8 specialized AI tools (7 agents + 1 MCP server) for different domains
+- **Self-Healing Pipelines**: Autonomous swarm with circuit breaker, knowledge-based fixes, automated rollback, and health monitoring
 - **Metadata-Driven Pipelines**: Configuration-based Silver and Gold transformations
 - **Unity Catalog Governance**: Centralized data governance and security
 - **Declarative Automation**: DAB-based deployment and CI/CD
@@ -42,6 +43,8 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 ✅ **Metadata-Driven**: No hardcoded transformations, all config-based  
 ✅ **SCD Type 2**: Historical tracking for dimensions  
 ✅ **Data Quality**: Built-in validation and reconciliation  
+✅ **Self-Healing**: Circuit breaker, fix knowledge base, automated rollback, dependency verification  
+✅ **Health Monitoring**: Composite health score, 6-hour monitoring cycle, anomaly alerting  
 ✅ **PII Masking**: Automated sensitive data protection  
 ✅ **Git Integration**: Version control and CI/CD ready
 
@@ -71,10 +74,10 @@ flowchart TB
             RF["silver_transformation_config<br/>gold_metric_config<br/>audit · reconciliation tables"]
         end
         subgraph DQ["✅ DQ Schema — Data Quality"]
-            DQF["7 DQ SQL functions<br/>check_policy_exists · check_claim_status<br/>check_premium_positive · check_loss_ratio<br/>check_not_null · check_date_order · calculate_dq_score"]
+            DQF["8 DQ SQL functions + dq_validation_results<br/>check_policy_exists · check_claim_status<br/>check_premium_positive · check_loss_ratio<br/>check_not_null · check_date_order · calculate_dq_score<br/>pipeline_health_score"]
         end
         subgraph Meta["🔧 Metadata Schema — Swarm Infrastructure"]
-            MT["mapping_documents · threshold_controls<br/>technical_docs volume<br/>7 toolkit SQL functions"]
+            MT["mapping_documents · threshold_controls<br/>swarm_fix_history · health_monitor_log<br/>technical_docs volume<br/>7 toolkit SQL functions"]
         end
     end
 
@@ -107,6 +110,10 @@ flowchart TB
         SW5["QA<br/>calculate_dq_score"]
         SW6["Deployment<br/>jobs.repair_run()"]
         SW1 --> SW2 --> SW3 --> SW4 --> SW5 --> SW6
+        SW7["RollbackManager<br/>Delta RESTORE"]
+        SW8["DependencyChecker<br/>UC lineage check"]
+        SW6 --> SW7
+        SW6 --> SW8
     end
 
     Meta -->|"metadata + toolkit"| Swarm
@@ -115,8 +122,9 @@ flowchart TB
     Swarm -.->|"repair"| Gold
 
     subgraph Jobs["⚙️ Job Orchestration"]
-        J1["Job 1: Agent Setup (run once)<br/>8 parallel tasks + 1 dependent<br/>~20 min"]
+        J1["Job 1: Agent Setup (run once)<br/>9 parallel tasks + 1 dependent<br/>~20 min"]
         J2["Job 2: Data Pipeline<br/>Bronze→Silver→Gold→Swarm<br/>load_type: INITIAL | INCREMENTAL"]
+        J3["Job 3: Health Monitor (every 6h)<br/>Table freshness · DQ pass rate<br/>Swarm success · health_score"]
     end
 
     J1 -->|"deploys"| Agents
@@ -423,20 +431,28 @@ The platform includes a **LangGraph-based autonomous agent swarm** that provides
 
 ### Architecture
 
-The swarm uses a **Plan-Execute-Verify-Deploy** loop with 6 specialized agents:
+The swarm uses a **Plan-Execute-Verify-Deploy** loop with 6 specialized agents and 2 built-in safety components:
 
 1. **Supervisor** — Orchestrates the swarm, assigns tasks (Llama 3.3 70B)
-2. **Triage** — Fetches real error logs via `jobs.get_run()` and `jobs.get_run_output()`
+2. **Triage** — Fetches real error logs via `jobs.get_run()` and `jobs.get_run_output()`, queries fix knowledge base for similar past resolutions
 3. **Business Analyst** — Updates mapping metadata in `pc_insurance.metadata.mapping_documents`
 4. **Data Engineer** — Applies schema/code fixes using the toolkit functions
 5. **QA** — Validates fixes using `pc_insurance.dq.calculate_dq_score`
 6. **Deployment** — Triggers pipeline repair via `jobs.repair_run()`
+7. **RollbackManager** — Automated Delta `RESTORE` if DQ score drops >10% post-fix; records pre-fix timestamp and compares `dq_score_before` / `dq_score_after`
+8. **DependencyChecker** — Verifies downstream table freshness via Unity Catalog lineage after upstream fixes
 
 ### Metadata Catalog
 
 - **Catalog**: `pc_insurance.metadata`
-- **Tables**: `mapping_documents` (7 rows, ACORD-standard mappings), `threshold_controls` (4 rows, KPI thresholds with CAT event overrides)
+- **Tables**:
+  - `mapping_documents` (7 rows, ACORD-standard mappings)
+  - `threshold_controls` (4 rows, KPI thresholds with CAT event overrides)
+  - `swarm_fix_history` — tracks every autonomous fix attempt with `circuit_breaker_triggered` column
+  - `health_monitor_log` — pipeline health metrics over time (health_score, stale tables, DQ pass rate, swarm success rate)
 - **UC Volume**: `pc_insurance.metadata.technical_docs` with subdirs: `post_mortems`, `schema_docs`, `escalations`
+- **DQ Table**: `pc_insurance.dq.dq_validation_results` — individual DQ rule validation outcomes (partitioned by `table_name`)
+- **Health Function**: `pc_insurance.dq.pipeline_health_score()` — composite health score: DQ (40%) + Freshness (25%) + Reconciliation (20%) + Error Rate (15%)
 
 ### Guardrails
 
@@ -444,6 +460,12 @@ The swarm uses a **Plan-Execute-Verify-Deploy** loop with 6 specialized agents:
 - $25 token budget per swarm run
 - UC Network Rules enforced
 - Sandbox isolation (prefix `dev_sandbox_`)
+- **Circuit Breaker**: Halts the swarm after 3+ failed fix attempts on the same `error_signature` within a 6-hour window. When triggered, logs `circuit_breaker_triggered = TRUE` in `swarm_fix_history` and escalates instead of retrying
+- **Fix Knowledge Base**: Before attempting a new fix, the Triage Agent queries `swarm_fix_history` for similar past successful resolutions using `error_signature` matching, accelerating resolution by reusing proven fix strategies
+
+### Infrastructure Provisioning
+
+All swarm infrastructure — including the 7 toolkit functions, DQ functions, `swarm_fix_history`, `health_monitor_log`, `dq_validation_results`, and `pipeline_health_score()` — is provisioned by Job 1 tasks (`swarm_setup`, `dq_functions_setup`, `toolkit_functions_setup`, `autonomy_infrastructure_setup`). The `autonomy_infrastructure_setup` task creates autonomy UC artifacts idempotently via `CREATE IF NOT EXISTS` and depends on `swarm_setup` and `dq_functions_setup`.
 
 ### Trigger Paths
 
@@ -480,7 +502,8 @@ pc_insurance/
 ├── silver/                    # Cleansed & conformed
 ├── gold/                      # Business KPIs
 ├── reference/                 # Metadata & configuration
-└── dq/                        # Data quality
+├── dq/                        # Data quality (8 DQ functions + dq_validation_results)
+└── metadata/                  # Swarm infrastructure (toolkit functions, swarm_fix_history, health_monitor_log)
 ```
 
 ### Security Model
@@ -502,12 +525,13 @@ pc_insurance/
 
 ### Job Configuration
 
-The project uses 2 jobs with distinct purposes:
+The project uses 3 jobs with distinct purposes:
 
 | Job | Name | ID | Purpose |
 |---|---|---|---|
-| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only (run once): 9 tasks — 5 parallel agent setups + swarm setup + DQ functions setup + toolkit functions setup + dependent Supervisor Agent setup |
+| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only (run once): 10 tasks — 5 parallel agent setups + swarm setup + DQ functions setup + toolkit functions setup + autonomy infrastructure setup + dependent Supervisor Agent setup |
 | 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold -> autonomous_swarm (on failure) with `load_type` parameter (INITIAL or INCREMENTAL) |
+| 3 | `PC_Insurance_Health_Monitor` | `88172905444926` | Health monitoring: runs every 6 hours, checks table freshness, DQ pass rate, swarm success rate, logs to `health_monitor_log` |
 
 **Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app.
 
@@ -518,7 +542,7 @@ The project uses 2 jobs with distinct purposes:
 **Run**: Manual (run once after UC setup is complete)
 **Duration**: ~20 minutes
 
-**Execution Pattern**: 8 tasks run in parallel, then 1 dependent task runs after all 8 complete.
+**Execution Pattern**: 8 tasks run in parallel, `autonomy_infrastructure_setup` runs after `swarm_setup` and `dq_functions_setup`, then `supervisor_agent_setup` runs after all 10 tasks complete.
 
 #### Parallel Tasks (1-8)
 
@@ -532,14 +556,15 @@ The project uses 2 jobs with distinct purposes:
 | 6 | `dq_functions_setup` | Registers 7 persistent DQ SQL functions in `pc_insurance.dq` via `swarm/PC_Insurance_DQ_Functions_Setup.py` (`check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`, `calculate_dq_score`) | 5 min |
 | 7 | `toolkit_functions_setup` | Registers 7 persistent UC toolkit SQL functions in `pc_insurance.metadata` via `swarm/PC_Insurance_Toolkit_Functions_Registration.py` (all use `to_json(named_struct(...))` syntax) | 5 min |
 | 8 | `mcp_app_deploy` | Deploys the MCP app `pc-insurance-workspace-actions` from `app/app.py`, configures SQL warehouse, service principal, and secret scope access | 10 min |
+| 10 | `autonomy_infrastructure_setup` | Creates autonomy UC artifacts: `dq_validation_results`, `swarm_fix_history` (with `circuit_breaker_triggered`), `health_monitor_log`, `pipeline_health_score()` function. Uses `CREATE IF NOT EXISTS` for idempotency. | 5 min |
 
 #### Dependent Task (9)
 
 | # | Task Name | Description | Depends On | Timeout |
 |---|---|---|---|---|
-| 9 | `supervisor_agent_setup` | Creates the Supervisor Agent ("P&C Insurance Medallion Architecture Team") with all 8 tools registered (7 subagents + 1 MCP app), configures anti-routing rules, validates endpoint readiness (ID: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`, endpoint: `mas-3fcb11f6-endpoint`) | 1-8 (all must succeed) | 10 min |
+| 9 | `supervisor_agent_setup` | Creates the Supervisor Agent ("P&C Insurance Medallion Architecture Team") with all 8 tools registered (7 subagents + 1 MCP app), configures anti-routing rules, validates endpoint readiness (ID: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`, endpoint: `mas-3fcb11f6-endpoint`) | 1-8 + 10 (all must succeed) | 10 min |
 
-**Task Failure Handling**: If any parallel task (1-8) fails, the Supervisor Agent setup (task 9) is skipped. The job can be re-run after fixing the failing task. All tasks are idempotent (safe to re-run).
+**Task Failure Handling**: If any task (1-8 or 10) fails, the Supervisor Agent setup (task 9) is skipped. The `autonomy_infrastructure_setup` task (10) requires `swarm_setup` (5) and `dq_functions_setup` (6) to succeed first. The job can be re-run after fixing the failing task. All tasks are idempotent (safe to re-run).
 
 **Trigger**: Run via the Databricks UI (Jobs > PC_Insurance_Agent_Setup > Run Now) or CLI (`databricks jobs run-now` with job ID `820361677269451`).
 
@@ -596,10 +621,11 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 
 ### DQ Functions (`pc_insurance.dq`)
 
-7 DQ SQL functions registered by `swarm/PC_Insurance_DQ_Functions_Setup.py` (job task `dq_functions_setup`):
+8 DQ SQL functions — 7 registered by `swarm/PC_Insurance_DQ_Functions_Setup.py` (job task `dq_functions_setup`), 1 by `swarm/PC_Insurance_Autonomy_Infrastructure_Setup.py` (job task `autonomy_infrastructure_setup`):
 
 - `check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`
 - `calculate_dq_score(total_records, failed_records)` — returns 0.0–1.0 DQ score
+- `pipeline_health_score()` — composite health score: DQ (40%) + Freshness (25%) + Reconciliation (20%) + Error Rate (15%)
 
 ---
 
@@ -607,9 +633,9 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 
 ### Schema: `pc_insurance.dq`
 
-**Table**: `dq_validation_results` (planned — not yet created) — will track validation rule, table/column, pass/fail status, failed record count, validation timestamp.
+**Table**: `dq_validation_results` — tracks validation rule, table/column, pass/fail status, failed record count, validation timestamp. Partitioned by `table_name`. Created by `swarm/PC_Insurance_Autonomy_Infrastructure_Setup.py` (Job 1 task: `autonomy_infrastructure_setup`).
 
-> **Note**: The `dq_validation_results` table is referenced in monitoring queries (RUNBOOK.md, DEPLOYMENT.md) but does not yet exist in `pc_insurance.dq`. The 7 DQ functions (`check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`, `calculate_dq_score`) currently return results inline. This table will be created when DQ result persistence is implemented. Monitoring queries referencing this table will return empty results until then.
+> **Note**: The `dq_validation_results` table is now deployed as part of the autonomy infrastructure. The 8 DQ functions (7 validation + `pipeline_health_score`) are available in every session.
 
 ### DQ Checks
 
@@ -660,6 +686,21 @@ databricks bundle deploy -t dev
 3. Review DQ scores (> 95% target)
 4. Check reconciliation status (all PASS)
 5. Review error logs (if any failures)
+
+### Health Monitor Job (Job 3)
+
+**Job**: `PC_Insurance_Health_Monitor` (ID: `88172905444926`)
+**Schedule**: Every 6 hours
+
+The Health Monitor computes a composite health score using `pipeline_health_score()` and logs results to `pc_insurance.metadata.health_monitor_log`:
+
+| Check | Description |
+|---|---|
+| Table freshness | Identifies stale tables (no updates in expected window) |
+| DQ pass rate | Validates DQ validation results trend |
+| Swarm success rate | Tracks fix success vs. failure ratio from `swarm_fix_history` |
+| Circuit breaker status | Checks if any circuit breakers were triggered |
+| Rollback events | Counts rollback operations in recent window |
 
 ### Alerts
 
@@ -717,11 +758,12 @@ The P&C Insurance Medallion Architecture provides:
 ✅ **Multi-Agent System**: 8 specialized AI tools (7 subagents + 1 MCP server)  
 ✅ **Metadata-Driven**: No hardcoded logic, all configuration-based  
 ✅ **Data Quality**: Built-in validation, reconciliation, and audit logging  
+✅ **Self-Healing Swarm**: Circuit breaker, fix knowledge base, automated rollback, dependency verification, health monitoring  
 ✅ **Unity Catalog Governance**: Centralized security and data governance  
 ✅ **Deployment-Ready**: CI/CD, monitoring, alerting, and rollback procedures
 
 ---
 
-**Document Version**: 4.0  
-**Last Updated**: 2026-09-28  
+**Document Version**: 4.1  
+**Last Updated**: 2026-09-29  
 **Maintained By**: Data Engineering Team

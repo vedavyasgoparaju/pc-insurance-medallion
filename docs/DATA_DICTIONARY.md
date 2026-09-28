@@ -673,6 +673,69 @@ See `sql/05_gold_metric_config.sql` for schema.
 
 ---
 
+### pc_insurance.metadata.swarm_fix_history
+
+**Description**: Tracks every autonomous swarm fix attempt with circuit breaker support
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| fix_id | STRING | Unique fix attempt identifier (UUID) |
+| run_id | LONG | Job run ID that triggered the swarm |
+| error_signature | STRING | Hashed error signature for dedup and matching |
+| error_message | STRING | Full error message from the failed run |
+| fix_strategy | STRING | Strategy applied (schema_fix, code_fix, config_update) |
+| fix_status | STRING | Status (SUCCESS, FAILED, ROLLED_BACK, ESCALATED) |
+| fix_timestamp | TIMESTAMP | When the fix was attempted |
+| pre_fix_timestamp | TIMESTAMP | Snapshot timestamp before fix was applied |
+| dq_score_before | DOUBLE | DQ score before the fix |
+| dq_score_after | DOUBLE | DQ score after the fix |
+| circuit_breaker_triggered | BOOLEAN | Whether the circuit breaker halted this run |
+| rollback_performed | BOOLEAN | Whether RollbackManager triggered a Delta RESTORE |
+| similar_past_fixes | INT | Count of similar past fixes found in knowledge base |
+| fix_history_recorded | BOOLEAN | Whether this fix was recorded in history |
+
+---
+
+### pc_insurance.metadata.health_monitor_log
+
+**Description**: Pipeline health metrics logged by the Health Monitor job (every 6 hours)
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| check_id | STRING | Unique check identifier (UUID) |
+| check_timestamp | TIMESTAMP | When the health check ran |
+| health_score | DOUBLE | Composite health score (0.0–1.0) |
+| stale_table_count | INT | Number of tables with stale data |
+| stale_tables | STRING | Comma-separated list of stale table names |
+| dq_pass_rate | DOUBLE | DQ validation pass rate (0.0–1.0) |
+| swarm_success_rate | DOUBLE | Swarm fix success rate (0.0–1.0) |
+| circuit_breaker_triggered | BOOLEAN | Whether any circuit breakers were triggered |
+| rollback_count | INT | Number of rollback operations in the window |
+| notes | STRING | Additional notes or alerts |
+
+---
+
+## DQ Schema Tables (pc_insurance.dq)
+
+### pc_insurance.dq.dq_validation_results
+
+**Description**: Individual DQ rule validation outcomes for trend analysis
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| validation_id | STRING | Unique validation identifier (UUID) |
+| table_name | STRING | Fully qualified table name being validated |
+| column_name | STRING | Column being validated (NULL for table-level checks) |
+| validation_rule | STRING | DQ rule name (e.g., check_not_null, check_loss_ratio) |
+| validation_result | STRING | PASS or FAIL |
+| total_records | LONG | Total records checked |
+| failed_record_count | LONG | Number of records that failed validation |
+| validation_timestamp | TIMESTAMP | When the validation ran |
+
+**Partitioning**: By `table_name`
+
+---
+
 ## UC Volumes
 
 ### pc_insurance.reference.pc_domain_docs
@@ -692,6 +755,20 @@ See `sql/05_gold_metric_config.sql` for schema.
 **Location**: `/Volumes/pc_insurance/metadata/technical_docs`
 
 **Subdirectories**: `post_mortems`, `schema_docs`, `escalations`
+
+---
+
+## UC Functions
+
+### pc_insurance.dq.pipeline_health_score()
+
+**Description**: Composite pipeline health score function combining DQ, freshness, reconciliation, and error rates
+
+**Formula**: DQ (40%) + Freshness (25%) + Reconciliation (20%) + Error Rate (15%)
+
+**Returns**: DOUBLE (0.0–1.0)
+
+**Registered by**: `swarm/PC_Insurance_Autonomy_Infrastructure_Setup.py` (Job 1 task: `autonomy_infrastructure_setup`)
 
 ---
 
@@ -724,6 +801,6 @@ See `sql/05_gold_metric_config.sql` for schema.
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: 2026-09-28  
+**Version**: 2.0  
+**Last Updated**: 2026-09-29  
 **Owner**: Data Engineering Team

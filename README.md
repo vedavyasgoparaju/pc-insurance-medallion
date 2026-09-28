@@ -14,6 +14,33 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Gold metric configuration** defining KPI sources, dimensions, formulas, grain, and refresh order
 - **Both INITIAL and INCREMENTAL load** patterns supported
 
+## Recent Changes (2026-09-29) — Self-Healing Architecture
+
+### Self-Healing Swarm Upgrades
+- **Circuit Breaker**: Halts swarm after 3+ failed fix attempts on same error signature within 6 hours
+- **Fix Knowledge Base**: Queries `swarm_fix_history` for similar past successful fixes before attempting new ones
+- **RollbackManager**: Automated Delta `RESTORE` if DQ score drops >10% post-fix
+- **DependencyChecker**: Verifies downstream table freshness after upstream fixes via UC lineage
+
+### New UC Artifacts
+- `pc_insurance.dq.dq_validation_results` — individual DQ rule validation outcomes (partitioned by table)
+- `pc_insurance.metadata.swarm_fix_history` — fix attempt tracking with `circuit_breaker_triggered` column
+- `pc_insurance.metadata.health_monitor_log` — pipeline health metrics over time
+- `pc_insurance.dq.pipeline_health_score()` — composite health score function (DQ 40% + Freshness 25% + Reconciliation 20% + Error Rate 15%)
+
+### Job 1 Enhanced (9 → 10 Tasks)
+- Added `autonomy_infrastructure_setup` task (depends on `swarm_setup`, `dq_functions_setup`)
+- Creates all 4 autonomy UC artifacts idempotently via `CREATE IF NOT EXISTS`
+- `supervisor_agent_setup` now also depends on this new task
+
+### Health Monitor Job (Job 3)
+- New job `PC_Insurance_Health_Monitor` (ID: 88172905444926)
+- Runs every 6 hours: checks table freshness, DQ pass rate, swarm success rate
+- Logs results to `pc_insurance.metadata.health_monitor_log`
+
+### Catalog Consolidation
+- All `pc_insurance_dev` references updated to `pc_insurance` across swarm notebook and DDL
+
 ## Recent Changes (2026-09-28)
 
 ### All 7 UC Toolkit Functions Now Persistent SQL Functions
@@ -40,7 +67,7 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 
 ### Unity Catalog Structure
 - **Catalog**: `pc_insurance`
-- **Schemas**: `bronze`, `silver`, `gold`, `reference`, `dq`
+- **Schemas**: `bronze`, `silver`, `gold`, `reference`, `dq`, `metadata`
 
 ### Bronze Layer (Raw Ingestion)
 
@@ -130,7 +157,9 @@ pc-insurance-medallion/
 │   ├── PC_Insurance_Autonomous_Agent_Swarm.py   # LangGraph swarm (6 agents, Plan-Execute-Verify-Deploy)
 │   ├── PC_Insurance_Swarm_Setup.py              # Swarm infrastructure provisioning
 │   ├── PC_Insurance_DQ_Functions_Setup.py       # 7 DQ SQL functions in pc_insurance.dq
-│   └── PC_Insurance_Toolkit_Functions_Registration.py  # 7 UC toolkit SQL functions
+│   ├── PC_Insurance_Toolkit_Functions_Registration.py  # 7 UC toolkit SQL functions
+│   ├── PC_Insurance_Autonomy_Infrastructure_Setup.py   # Autonomy UC artifacts (tables, functions)
+│   └── PC_Insurance_Health_Monitor.py               # Health monitor notebook (6h schedule)
 ├── app/
 │   ├── app.py                      # MCP server (pc-insurance-workspace-actions)
 │   ├── app.yaml                    # Databricks App config
@@ -150,7 +179,8 @@ pc-insurance-medallion/
 │   ├── ARCHITECTURE.md             # Architecture documentation
 │   ├── DATA_DICTIONARY.md          # Column-level data dictionary
 │   ├── DEPLOYMENT.md               # Deployment & getting started guide
-│   └── RUNBOOK.md                  # Operations runbook
+│   ├── RUNBOOK.md                  # Operations runbook
+│   └── SERVICES.md                 # Databricks services reference
 ├── README.md                        # This file
 ├── databricks.yml                   # DAB bundle config
 ├── pyproject.toml                  # Python project config

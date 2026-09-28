@@ -1,7 +1,7 @@
 # P&C Insurance Medallion — Databricks Services Reference
 
 **Version:** 1.0  
-**Last Updated:** 2026-09-28  
+**Last Updated:** 2026-09-29  
 **Purpose:** Comprehensive reference for every Databricks service used in this project, what it does, and how it's applied.
 
 ---
@@ -53,8 +53,8 @@ A single catalog `pc_insurance` holds all project objects across 6 schemas:
 | `silver` | Cleansed & conformed | 4 dims (SCD2), 2 facts, 1 date_dim |
 | `gold` | Business KPIs | 6 pre-aggregated metric tables |
 | `reference` | Config & audit | silver_transformation_config, gold_metric_config, audit & reconciliation tables |
-| `dq` | Data quality | 7 persistent DQ SQL functions |
-| `metadata` | Swarm infrastructure | 7 toolkit functions, 2 tables, 1 volume |
+| `dq` | Data quality | 8 persistent DQ SQL functions (incl. `pipeline_health_score`), 1 results table |
+| `metadata` | Swarm infrastructure | 7 toolkit functions, 3 tables (mapping_documents, swarm_fix_history, health_monitor_log), 1 volume |
 
 **Key artifacts:**
 - Catalog: `pc_insurance`
@@ -116,6 +116,7 @@ All use `CREATE OR REPLACE FUNCTION ... RETURN to_json(named_struct(...))` synta
 | `check_not_null(column, value)` | Generic NOT NULL check |
 | `check_date_order(start, end)` | Validates date chronological order |
 | `calculate_dq_score(total, failed)` | Returns 0.0–1.0 DQ score |
+| `pipeline_health_score()` | Composite health score: DQ (40%) + Freshness (25%) + Reconciliation (20%) + Error Rate (15%) |
 
 **Where registered:**
 - Toolkit: `swarm/PC_Insurance_Toolkit_Functions_Registration.py` (Job 1 task: `toolkit_functions_setup`)
@@ -135,6 +136,19 @@ All use `CREATE OR REPLACE FUNCTION ... RETURN to_json(named_struct(...))` synta
 | `pc_domain_docs` | `/Volumes/pc_insurance/reference/pc_domain_docs/` | P&C insurance reference documents for the Domain Expert Knowledge Assistant (RAG source) |
 
 **Where configured:** `technical_docs` created by `swarm/PC_Insurance_Swarm_Setup.py`. `pc_domain_docs` created by `agents/Domain_Expert_Setup.py`.
+
+### Autonomy Infrastructure Tables & Functions
+
+**What they are:** UC tables and functions that support the self-healing swarm's circuit breaker, fix knowledge base, and health monitoring.
+
+| Artifact | Schema | Purpose |
+|---|---|---|
+| `dq_validation_results` | `pc_insurance.dq` | Individual DQ rule validation outcomes (partitioned by table_name) |
+| `swarm_fix_history` | `pc_insurance.metadata` | Tracks every autonomous fix attempt with `circuit_breaker_triggered` column |
+| `health_monitor_log` | `pc_insurance.metadata` | Pipeline health metrics over time (health_score, stale tables, DQ pass rate, swarm success rate) |
+| `pipeline_health_score()` | `pc_insurance.dq` | Composite health score function: DQ (40%) + Freshness (25%) + Reconciliation (20%) + Error Rate (15%) |
+
+**Where configured:** `swarm/PC_Insurance_Autonomy_Infrastructure_Setup.py` (Job 1 task: `autonomy_infrastructure_setup`). Uses `CREATE TABLE IF NOT EXISTS` for idempotent deployment.
 
 ---
 
@@ -295,6 +309,10 @@ The **Autonomous Agent Swarm** is a LangGraph-based self-healing system with 6 a
 - $25 token budget per swarm run
 - UC Network Rules for HTTPS egress
 - Sandbox isolation (prefix `dev_sandbox_`)
+- **Circuit Breaker**: Halts swarm after 3+ failed fix attempts on same `error_signature` within 6 hours
+- **Fix Knowledge Base**: Queries `swarm_fix_history` for similar past successful fixes before attempting new ones
+- **RollbackManager**: Automated Delta `RESTORE` if DQ score drops >10% post-fix
+- **DependencyChecker**: Verifies downstream table freshness after upstream fixes via UC lineage
 
 **Trigger paths:**
 1. **Automatic**: Job 2 task fails → `autonomous_swarm` triggers (`run_if=AT_LEAST_ONE_FAILED`)
@@ -302,6 +320,32 @@ The **Autonomous Agent Swarm** is a LangGraph-based self-healing system with 6 a
 3. **Interactive**: Supervisor Agent chat routes to `workspace-actions` MCP tool
 
 **Where configured:** `swarm/PC_Insurance_Autonomous_Agent_Swarm.py` (24 cells, 3000+ lines). Uses `langgraph.graph.StateGraph`, `MemorySaver` for checkpointing.
+
+---
+
+### Health Monitor (Lakeflow Job)
+
+**What it is:** A scheduled Lakeflow Job that runs every 6 hours to assess pipeline health, DQ validation rates, swarm fix success rates, and alert on anomalies.
+
+**How it's used here:**
+
+The Health Monitor job computes a composite health score using the `pipeline_health_score()` UC function and logs results to `pc_insurance.metadata.health_monitor_log`:
+
+| Check | Description |
+|---|---|
+| Table freshness | Identifies stale tables (no updates in expected window) |
+| DQ pass rate | Validates DQ validation results trend |
+| Swarm success rate | Tracks fix success vs. failure ratio from `swarm_fix_history` |
+| Circuit breaker status | Checks if any circuit breakers were triggered |
+| Rollback events | Counts rollback operations in recent window |
+
+**Key artifacts:**
+- Job ID: `88172905444926`
+- Job name: `PC_Insurance_Health_Monitor`
+- Schedule: Every 6 hours
+- Notebook: `swarm/PC_Insurance_Health_Monitor`
+
+**Where configured:** `swarm/PC_Insurance_Health_Monitor` notebook. Job created via Lakeflow Jobs API.
 
 ---
 

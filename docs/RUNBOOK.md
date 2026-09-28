@@ -56,8 +56,6 @@ This runbook provides operational procedures for running, monitoring, and troubl
    SELECT 
      table_name,
      AVG(CASE WHEN validation_result = 'PASS' THEN 1.0 ELSE 0.0 END) AS dq_score
-   -- NOTE: dq_validation_results table is planned but not yet created.
-   -- DQ functions return results inline. This query will return empty until the table is created.
    FROM pc_insurance.dq.dq_validation_results
    WHERE DATE(validation_timestamp) = CURRENT_DATE() - 1
    GROUP BY table_name;
@@ -104,6 +102,41 @@ for run in runs:
 ```
 
 > **For pipeline execution commands, see [DEPLOYMENT.md](DEPLOYMENT.md) > Running the Pipelines.**
+
+### Health Monitor Job (Job 3)
+
+**Job Name**: `PC_Insurance_Health_Monitor`
+**Job ID**: `88172905444926`
+**Schedule**: Every 6 hours
+
+The Health Monitor job runs automatically every 6 hours to assess pipeline health. It computes a composite health score using `pipeline_health_score()` and logs results to `pc_insurance.metadata.health_monitor_log`.
+
+**Check Health Monitor Status**:
+```python
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+
+job_id = 88172905444926
+runs = w.jobs.list_runs(job_id=job_id, limit=5)
+
+for run in runs:
+    print(f"Run ID: {run.run_id} | Status: {run.state.life_cycle_state} | Start: {run.start_time}")
+```
+
+**View Latest Health Score**:
+```sql
+SELECT
+  check_timestamp,
+  health_score,
+  stale_table_count,
+  dq_pass_rate,
+  swarm_success_rate,
+  circuit_breaker_triggered,
+  rollback_count
+FROM pc_insurance.metadata.health_monitor_log
+ORDER BY check_timestamp DESC
+LIMIT 10;
+```
 
 ---
 
@@ -163,6 +196,29 @@ SELECT
 FROM pc_insurance.reference.silver_load_audit
 WHERE run_timestamp >= CURRENT_DATE() - 7
 ORDER BY run_date DESC, transformation_id;
+
+-- Swarm fix history (last 7 days)
+SELECT
+  fix_id,
+  error_signature,
+  fix_status,
+  circuit_breaker_triggered,
+  rollback_performed,
+  fix_timestamp
+FROM pc_insurance.metadata.swarm_fix_history
+WHERE fix_timestamp >= CURRENT_DATE() - 7
+ORDER BY fix_timestamp DESC;
+
+-- Pipeline health score trend
+SELECT
+  check_timestamp,
+  ROUND(health_score, 4) AS health_score,
+  stale_table_count,
+  ROUND(dq_pass_rate, 4) AS dq_pass_rate,
+  ROUND(swarm_success_rate, 4) AS swarm_success_rate
+FROM pc_insurance.metadata.health_monitor_log
+WHERE check_timestamp >= CURRENT_DATE() - 7
+ORDER BY check_timestamp DESC;
 ```
 
 ### Alert Conditions
@@ -175,6 +231,9 @@ ORDER BY run_date DESC, transformation_id;
 | Reconciliation Fail | recon_status = 'FAIL' | High | Investigate count mismatch |
 | Execution Time High | execution_time > 2x baseline | Warning | Check for performance issues |
 | No Data | source_row_count = 0 | High | Check upstream systems |
+| Health Score Low | health_score < 0.80 | Critical | Review stale tables, DQ failures |
+| Circuit Breaker Triggered | circuit_breaker_triggered = TRUE | High | Investigate repeated fix failures |
+| Rollback Performed | rollback_performed = TRUE | High | Review fix quality, check DQ score delta |
 
 ---
 
@@ -286,7 +345,58 @@ spark.sql("""
 4. Consider Z-ordering on frequently filtered columns
 5. Increase cluster size if needed
 
-#### 5. Missing Data
+#### 5. Circuit Breaker Triggered
+
+**Symptoms**: Swarm halts with circuit_breaker_triggered = TRUE in swarm_fix_history
+
+**Diagnosis**:
+```sql
+SELECT
+  error_signature,
+  COUNT(*) AS failed_attempts,
+  MIN(fix_timestamp) AS first_attempt,
+  MAX(fix_timestamp) AS last_attempt
+FROM pc_insurance.metadata.swarm_fix_history
+WHERE circuit_breaker_triggered = TRUE
+  AND fix_timestamp >= CURRENT_DATE() - 1
+GROUP BY error_signature
+ORDER BY failed_attempts DESC;
+```
+
+**Resolution Steps**:
+1. Identify the recurring error_signature causing repeated failures
+2. Review the error logs and fix attempts in swarm_fix_history
+3. Determine if the fix strategy is appropriate for this error type
+4. Apply a manual fix or escalate to the data engineering team
+5. After manual resolution, the circuit breaker will not trigger for new error signatures
+
+#### 6. Rollback Performed
+
+**Symptoms**: RollbackManager triggered a Delta RESTORE after a fix degraded DQ score
+
+**Diagnosis**:
+```sql
+SELECT
+  fix_id,
+  error_signature,
+  dq_score_before,
+  dq_score_after,
+  rollback_performed,
+  fix_timestamp
+FROM pc_insurance.metadata.swarm_fix_history
+WHERE rollback_performed = TRUE
+  AND fix_timestamp >= CURRENT_DATE() - 7
+ORDER BY fix_timestamp DESC;
+```
+
+**Resolution Steps**:
+1. Review the fix that caused the DQ score drop (>10% degradation triggers rollback)
+2. Verify the table was successfully restored to its pre-fix state
+3. Investigate why the fix degraded data quality
+4. Manually apply a corrected fix or escalate
+5. Monitor subsequent swarm runs to ensure the issue doesn't recur
+
+#### 7. Missing Data
 
 **Symptoms**: Expected data not present in Bronze layer
 
@@ -554,12 +664,13 @@ audit_df.coalesce(1).write.mode("overwrite").option("header", "true").csv("/tmp/
 
 - [Architecture Guide](./ARCHITECTURE.md)
 - [Data Dictionary](./DATA_DICTIONARY.md)
-- [Git Automation Guide](./Git_Automation_Guide.md)
+- [Deployment Guide](./DEPLOYMENT.md)
+- [Services Reference](./SERVICES.md)
 - [Databricks Documentation](https://docs.databricks.com/)
 
 ---
 
-**Version**: 2.0  
-**Last Updated**: 2026-09-25  
+**Version**: 3.0  
+**Last Updated**: 2026-09-29  
 **Owner**: Data Engineering Team  
 **Review Frequency**: Quarterly
