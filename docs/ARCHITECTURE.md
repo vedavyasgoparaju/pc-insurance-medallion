@@ -10,17 +10,18 @@
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Architecture Layers](#architecture-layers)
+2. [Architecture Diagram](#architecture-diagram)
+3. [Architecture Layers](#architecture-layers)
 3. [Multi-Agent System](#multi-agent-system)
-4. [Agent Roles & Responsibilities](#agent-roles--responsibilities)
-5. [Metadata-Driven Framework](#metadata-driven-framework)
-6. [Data Flow](#data-flow)
-7. [Unity Catalog Structure](#unity-catalog-structure)
-8. [Pipeline Orchestration](#pipeline-orchestration)
-9. [Deployment Architecture](#deployment-architecture)
-10. [Operations & Monitoring](#operations--monitoring)
-11. [Performance Optimization](#performance-optimization)
-12. [Future Enhancements](#future-enhancements)
+3. [Agent Roles & Responsibilities](#agent-roles--responsibilities)
+4. [Metadata-Driven Framework](#metadata-driven-framework)
+5. [Data Flow](#data-flow)
+6. [Unity Catalog Structure](#unity-catalog-structure)
+7. [Pipeline Orchestration](#pipeline-orchestration)
+8. [Deployment Architecture](#deployment-architecture)
+9. [[Operations & Monitoring](#operations--monitoring)
+10. [Performance Optimization](#performance-optimization)
+11. [Future Enhancements](#future-enhancements)
 
 ---
 
@@ -43,6 +44,97 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 ✅ **Data Quality**: Built-in validation and reconciliation  
 ✅ **PII Masking**: Automated sensitive data protection  
 ✅ **Git Integration**: Version control and CI/CD ready
+
+---
+
+## Architecture Diagram
+
+> **Interactive version**: Open [`docs/architecture_diagram.html`](architecture_diagram.html) in a browser for hover-over descriptions of each component.
+
+```mermaid
+flowchart TB
+    subgraph Sources["📤 Source Systems"]
+        SRC["Policy Admin · Claims Mgmt<br/>Billing · Customer Master · Agent Data"]
+    end
+
+    subgraph UC["🗄️ Unity Catalog: pc_insurance"]
+        subgraph Bronze["🥉 Bronze Layer — Raw Ingestion"]
+            BZ["5 raw tables<br/>policies_raw · claims_raw<br/>premiums_raw · customers_raw · agents_raw"]
+        end
+        subgraph Silver["🥈 Silver Layer — Cleansed & Conformed"]
+            SV["7 tables (4 dims + 2 facts + date_dim)<br/>SCD2 · PII masking · dedup"]
+        end
+        subgraph Gold["🥇 Gold Layer — Business KPIs"]
+            GD["6 KPI tables<br/>loss_ratio · frequency_severity<br/>retention · growth · exposure · uw_dashboard"]
+        end
+        subgraph Ref["📋 Reference Schema — Metadata-Driven Config"]
+            RF["silver_transformation_config<br/>gold_metric_config<br/>audit · reconciliation tables"]
+        end
+        subgraph DQ["✅ DQ Schema — Data Quality"]
+            DQF["7 DQ SQL functions<br/>check_policy_exists · check_claim_status<br/>check_premium_positive · check_loss_ratio<br/>check_not_null · check_date_order · calculate_dq_score"]
+        end
+        subgraph Meta["🔧 Metadata Schema — Swarm Infrastructure"]
+            MT["mapping_documents · threshold_controls<br/>technical_docs volume<br/>7 toolkit SQL functions"]
+        end
+    end
+
+    SRC -->|"Bronze_Pipeline.py"| Bronze
+    Bronze -->|"Silver_Pipeline_Metadata.py"| Silver
+    Silver -->|"Gold_Pipeline.py"| Gold
+    Ref -.->|"config"| Silver
+    Ref -.->|"config"| Gold
+    DQ -.->|"validates"| Silver
+    DQ -.->|"validates"| Gold
+
+    subgraph Agents["🤖 Multi-Agent System — Supervisor Orchestrator"]
+        SUP["Supervisor Agent<br/>mas-3fcb11f6-endpoint"]
+        ARCH["Architect Agent<br/>pc_architect_agent"]
+        DE["Data Engineer Agent<br/>pc_data_engineer_agent"]
+        DOM["Domain Expert Agent<br/>Knowledge Assistant (RAG)"]
+        ANA["Analyst Agent<br/>Genie Space"]
+        DEV["DevOps Agent<br/>Genie Space"]
+        QA["QA Validator<br/>calculate_dq_score"]
+        MCP["Workspace-Actions<br/>MCP App (git, files, SQL)"]
+    end
+
+    SUP --> ARCH & DE & DOM & ANA & DEV & QA & MCP
+
+    subgraph Swarm["🔄 Autonomous Agent Swarm — LangGraph Self-Healing"]
+        SW1["Supervisor<br/>(Llama 3.3 70B)"]
+        SW2["Triage<br/>jobs.get_run()"]
+        SW3["Business Analyst<br/>mapping_documents"]
+        SW4["Data Engineer<br/>toolkit functions"]
+        SW5["QA<br/>calculate_dq_score"]
+        SW6["Deployment<br/>jobs.repair_run()"]
+        SW1 --> SW2 --> SW3 --> SW4 --> SW5 --> SW6
+    end
+
+    Meta -->|"metadata + toolkit"| Swarm
+    Swarm -.->|"repair"| Bronze
+    Swarm -.->|"repair"| Silver
+    Swarm -.->|"repair"| Gold
+
+    subgraph Jobs["⚙️ Job Orchestration"]
+        J1["Job 1: Agent Setup (run once)<br/>8 parallel tasks + 1 dependent<br/>~20 min"]
+        J2["Job 2: Data Pipeline<br/>Bronze→Silver→Gold→Swarm<br/>load_type: INITIAL | INCREMENTAL"]
+    end
+
+    J1 -->|"deploys"| Agents
+    J1 -->|"provisions"| Swarm
+    J2 -->|"runs"| Bronze
+    J2 -->|"runs"| Silver
+    J2 -->|"runs"| Gold
+    J2 -.->|"on failure"| Swarm
+
+    subgraph Consumption["📊 Consumption Layer"]
+        BI["BI Dashboards"]
+        AQ["Analyst Agent Queries"]
+        ML["ML Models"]
+    end
+
+    Gold --> BI & AQ & ML
+
+```
 
 ---
 
@@ -536,7 +628,7 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 | Development | `pc_insurance` | `feature/*` or `dev` | Development and testing |
 | Main (Dev) | `pc_insurance` | `main` | Active development environment |
 
-> **Note**: Only the `dev` environment is currently active. Only the `dev` environment is currently active. See [DEPLOYMENT.md](DEPLOYMENT.md) for multi-environment guidance.
+> **Note**: Only the `dev` environment is currently active. See [DEPLOYMENT.md](DEPLOYMENT.md) for multi-environment guidance.
 
 ### Databricks Asset Bundles (DAB)
 
