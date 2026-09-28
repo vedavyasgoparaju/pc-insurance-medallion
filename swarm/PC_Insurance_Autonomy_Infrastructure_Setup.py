@@ -1,4 +1,5 @@
 # Databricks notebook source
+# DBTITLE 1,Autonomy Infrastructure Setup
 # MAGIC %md
 # MAGIC # P&C Insurance — Autonomy Infrastructure Setup
 # MAGIC
@@ -15,6 +16,7 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Configuration
 # Configuration
 CATALOG = "pc_insurance"
 
@@ -23,6 +25,7 @@ print("=" * 70)
 
 # COMMAND ----------
 
+# DBTITLE 1,Create DQ Validation Results Table
 # 1. DQ Validation Results Table
 # Stores individual DQ rule validation outcomes for trend analysis
 
@@ -46,6 +49,7 @@ print("✓ Created dq_validation_results table")
 
 # COMMAND ----------
 
+# DBTITLE 1,Create Swarm Fix History Table
 # 2. Swarm Fix History Table
 # Tracks every autonomous fix attempt with circuit breaker support
 
@@ -81,6 +85,7 @@ print("✓ Created swarm_fix_history table")
 
 # COMMAND ----------
 
+# DBTITLE 1,Create Health Monitor Log Table
 # 3. Health Monitor Log Table
 # Stores periodic health monitoring events from the Health Monitor job
 
@@ -105,6 +110,7 @@ print("✓ Created health_monitor_log table")
 
 # COMMAND ----------
 
+# DBTITLE 1,Create Pipeline Health Score Function
 # 4. Pipeline Health Score Function
 # Composite score: DQ (40%) + Freshness (25%) + Reconciliation (20%) + Error Rate (15%)
 
@@ -137,6 +143,7 @@ print("✓ Created pipeline_health_score function")
 
 # COMMAND ----------
 
+# DBTITLE 1,Verification
 # 5. Verification
 print("=" * 70)
 print("Autonomy Infrastructure Verification")
@@ -174,3 +181,6 @@ print(f"  Test — Degraded pipeline score:  {test_score['degraded']}")
 print("=" * 70)
 print("Autonomy infrastructure setup complete!")
 print("=" * 70)
+
+# COMMAND ----------
+

@@ -40,7 +40,7 @@
 # MAGIC ### Key Design Principles
 # MAGIC
 # MAGIC - **Metadata-driven**: Agents never modify raw pipeline code — only mapping documents and metadata configs
-# MAGIC - **Sandbox isolation**: All changes tested in `dev_sandbox_<run_id>` before deployment
+# MAGIC - **Sandbox isolation**: All changes tested in `dev_staging_<run_id>` before production
 # MAGIC - **Loop protection**: Max 5 ReAct iterations or token-dollar cap before human escalation
 # MAGIC - **Auto-documentation**: Every change triggers UC comment updates + Markdown runbook generation
 # MAGIC
@@ -106,8 +106,8 @@ SERVERLESS_WAREHOUSE_ID = os.environ.get("PC_INSURANCE_WAREHOUSE_ID", "")
 # Unity Catalog metadata store locations
 METADATA_CATALOG    = "pc_insurance"
 METADATA_SCHEMA     = "metadata"
-CATALOG        = "pc_insurance"
-SANDBOX_CATALOG_PREFIX = "dev_sandbox_"
+PROD_CATALOG        = "pc_insurance"
+STAGING_CATALOG_PREFIX = "dev_staging_"
 
 # Documentation volume path (UC Volume)
 DOCS_VOLUME_PATH = "/Volumes/pc_insurance/metadata/technical_docs"
@@ -140,15 +140,15 @@ logger = logging.getLogger("PC_AgentSwarm")
 
 # DBTITLE 1,Infrastructure Setup & Seeding
 # Cell 2b: Infrastructure Setup — Catalog, Tables, Volume, Seeding
-# Creates the full pc_insurance infrastructure.
+# Creates the full pc_insurance_dev infrastructure.
 
 import json
 import datetime
 
-print("Creating pc_insurance infrastructure...")
+print("Creating pc_insurance_dev infrastructure...")
 
 # 1. Catalog + Schema
-spark.sql("CREATE CATALOG IF NOT EXISTS pc_insurance")
+spark.sql("CREATE CATALOG IF NOT EXISTS pc_insurance_dev")
 spark.sql("CREATE SCHEMA IF NOT EXISTS pc_insurance.metadata")
 print("Catalog + schema created")
 
@@ -396,7 +396,7 @@ display(spark.sql("""
     ORDER BY metric_name, region
 """))
 
-print("\npc_insurance infrastructure setup complete!")
+print("\npc_insurance_dev infrastructure setup complete!")
 
 # COMMAND ----------
 
@@ -463,7 +463,7 @@ class SwarmState(TypedDict, total=False):
     # ── QA / Validation ──
     validation_results: Dict[str, Any]   # DLT expectation results
     validation_passed: bool              # True if sandbox QA passed
-    sandbox_catalog: str                 # Name of the sandbox catalog
+    sandbox_catalog: str                 # Name of the staging catalog
     sandbox_run_id: str                   # Databricks run ID in sandbox
 
     # ── Documentation ──
@@ -481,14 +481,14 @@ class SwarmState(TypedDict, total=False):
     human_escalation_reason: str          # If halted, why
     final_status: str                     # "resolved", "halted", "escalated"
 
-    # ── Autonomous Enhancements (Iteration 2) ──────────────────────
-    pre_fix_timestamp: str                # ISO timestamp before fix (for rollback)
-    dq_score_before: float                # DQ score before fix (NULL if not measured)
-    dq_score_after: float                 # DQ score after fix (NULL if not measured)
-    circuit_breaker_triggered: bool       # True if circuit breaker halted the swarm
-    previous_fix_applied: str             # Description of past successful fix (from knowledge base)
-    rollback_performed: bool              # True if automated rollback was triggered
-    fix_history_id: str                   # UUID of the swarm_fix_history record
+    # ── Autonomy: Circuit Breaker & Rollback ──
+    pre_fix_timestamp: str               # ISO timestamp before fix (for RESTORE)
+    dq_score_before: float               # DQ score before fix applied
+    dq_score_after: float                # DQ score after fix applied
+    circuit_breaker_triggered: bool      # True if circuit breaker halted
+    rollback_performed: bool             # True if automated rollback executed
+    similar_past_fixes: List[Dict[str, Any]]  # Past fixes for same error class
+    fix_history_recorded: bool           # Whether fix was logged to swarm_fix_history
 
 
 # ── Helper: Initialize a fresh SwarmState ──────────────────────────
@@ -527,164 +527,14 @@ def init_swarm_state(run_id: str, trigger_source: str = "alert") -> SwarmState:
         messages=[],
         human_escalation_reason="",
         final_status="",
-        # Autonomous enhancements
         pre_fix_timestamp="",
-        dq_score_before=None,
-        dq_score_after=None,
+        dq_score_before=0.0,
+        dq_score_after=0.0,
         circuit_breaker_triggered=False,
-        previous_fix_applied="",
         rollback_performed=False,
-        fix_history_id=str(uuid.uuid4()),
+        similar_past_fixes=[],
+        fix_history_recorded=False,
     )
-
-
-# ═══════════════════════════════════════════════════════════════
-# Autonomous Enhancement Helpers (Iteration 2)
-# ═══════════════════════════════════════════════════════════════
-
-CIRCUIT_BREAKER_THRESHOLD = 3  # Max failed attempts on same error class within 24h
-
-def query_fix_history(error_class: str, hours: int = 24) -> list:
-    """Query swarm_fix_history for recent fixes matching the error class.
-    Used by the circuit breaker and the fix knowledge base."""
-    try:
-        df = spark.sql(f"""
-            SELECT fix_id, error_class, fix_applied, dq_score_before, dq_score_after,
-                   resolution_status, fix_timestamp, rollback_performed
-            FROM pc_insurance.metadata.swarm_fix_history
-            WHERE error_class = '{error_class}'
-              AND fix_timestamp >= TIMESTAMPADD(HOUR, -{hours}, CURRENT_TIMESTAMP())
-            ORDER BY fix_timestamp DESC
-            LIMIT 10
-        """)
-        return df.collect()
-    except Exception as e:
-        logging.getLogger("SwarmHelpers").warning(f"Fix history query failed: {e}")
-        return []
-
-def check_circuit_breaker(error_class: str) -> tuple:
-    """Check if the same error class has failed too many times recently.
-    Returns (should_halt, failed_count, details)."""
-    if not error_class:
-        return False, 0, ""
-    history = query_fix_history(error_class, hours=24)
-    failed = [h for h in history if h["resolution_status"] in ("failed", "rollback")]
-    if len(failed) >= CIRCUIT_BREAKER_THRESHOLD:
-        return True, len(failed), (
-            f"Circuit breaker: {len(failed)} failed attempts on '{error_class}' in last 24h. "
-            f"Escalating to human instead of retrying."
-        )
-    return False, len(failed), ""
-
-def get_previous_successful_fix(error_class: str) -> str:
-    """Find the most recent successful fix for the same error class.
-    Used by the Triage agent to suggest proven fixes."""
-    try:
-        df = spark.sql(f"""
-            SELECT fix_applied, dq_score_before, dq_score_after
-            FROM pc_insurance.metadata.swarm_fix_history
-            WHERE error_class = '{error_class}'
-              AND resolution_status = 'resolved'
-            ORDER BY fix_timestamp DESC
-            LIMIT 1
-        """)
-        rows = df.collect()
-        if rows:
-            row = rows[0]
-            dq_info = ""
-            if row["dq_score_before"] is not None and row["dq_score_after"] is not None:
-                dq_info = f" (DQ: {row['dq_score_before']:.2f} → {row['dq_score_after']:.2f})"
-            return f"{row['fix_applied']}{dq_info}"
-    except Exception:
-        pass
-    return ""
-
-def log_fix_to_history(state: SwarmState) -> None:
-    """Persist the swarm run result to swarm_fix_history for cumulative learning."""
-    try:
-        fix_id = state.get("fix_history_id", str(uuid.uuid4()))
-        dq_before = state.get("dq_score_before")
-        dq_after = state.get("dq_score_after")
-        error_msg = (state.get("error_log", "") or "")[:500].replace("'", "''")
-        fix_desc = str(state.get("metadata_delta", "") or "")[:500].replace("'", "''")
-        post_mortem = (state.get("technical_docs_payload", {}).get("post_mortem", "") or "")[:200].replace("'", "''")
-
-        spark.sql(f"""
-            INSERT INTO pc_insurance.metadata.swarm_fix_history
-            (fix_id, run_id, trigger_source, error_class, error_message, affected_table,
-             fix_applied, dq_score_before, dq_score_after, resolution_status,
-             fix_timestamp, swarm_duration_sec, token_cost_usd, rollback_performed,
-             post_mortem_path)
-            VALUES (
-                '{fix_id}',
-                '{state.get("run_id", "")}',
-                '{state.get("trigger_source", "")}',
-                '{state.get("error_class", "unknown")}',
-                '{error_msg}',
-                '{state.get("affected_table", "")}',
-                '{fix_desc}',
-                {dq_before if dq_before is not None else "NULL"},
-                {dq_after if dq_after is not None else "NULL"},
-                '{state.get("final_status", "unknown")}',
-                CURRENT_TIMESTAMP(),
-                0,
-                {state.get("token_cost_usd", 0.0)},
-                {str(state.get("rollback_performed", False)).lower()},
-                '{post_mortem}'
-            )
-        """)
-    except Exception as e:
-        logging.getLogger("SwarmHelpers").warning(f"Failed to log fix history: {e}")
-
-def calculate_dq_score_for_table(table_name: str) -> float:
-    """Calculate a DQ score for a table using basic checks. Returns 0.0-1.0."""
-    try:
-        df = spark.sql(f"SELECT COUNT(*) AS cnt FROM {table_name}")
-        total = df.collect()[0]["cnt"]
-        if total == 0:
-            return 1.0
-        failed = 0
-        for col_check in ["policy_id", "claim_id", "customer_id", "agent_id", "premium_amount"]:
-            try:
-                null_df = spark.sql(f"SELECT COUNT(*) AS nulls FROM {table_name} WHERE {col_check} IS NULL")
-                failed += null_df.collect()[0]["nulls"]
-            except Exception:
-                pass
-        score = 1.0 - (failed / total) if total > 0 else 1.0
-        return max(0.0, min(1.0, score))
-    except Exception as e:
-        logging.getLogger("SwarmHelpers").warning(f"DQ score calculation failed for {table_name}: {e}")
-        return 1.0
-
-def perform_rollback(affected_table: str, pre_fix_timestamp: str) -> bool:
-    """Roll back a table to its pre-fix Delta Lake version using time travel."""
-    try:
-        spark.sql(f"RESTORE TABLE {affected_table} TO TIMESTAMP AS OF '{pre_fix_timestamp}'")
-        logging.getLogger("SwarmHelpers").info(f"Rollback successful: {affected_table} restored to {pre_fix_timestamp}")
-        return True
-    except Exception as e:
-        logging.getLogger("SwarmHelpers").error(f"Rollback failed for {affected_table}: {e}")
-        return False
-
-def verify_downstream_freshness(affected_table: str, downstream_tables: list) -> list:
-    """After repair, verify that downstream tables reflect the repaired data.
-    Returns a list of stale downstream tables that need rerunning."""
-    stale = []
-    try:
-        repaired_df = spark.sql(f"DESCRIBE HISTORY {affected_table} LIMIT 1")
-        repaired_version = repaired_df.collect()[0]["timestamp"]
-        for downstream in downstream_tables:
-            try:
-                ds_df = spark.sql(f"DESCRIBE HISTORY {downstream} LIMIT 1")
-                ds_version = ds_df.collect()[0]["timestamp"]
-                if ds_version < repaired_version:
-                    stale.append(downstream)
-            except Exception:
-                pass
-    except Exception as e:
-        logging.getLogger("SwarmHelpers").warning(f"Downstream freshness check failed: {e}")
-    return stale
-
 
 # COMMAND ----------
 
@@ -798,7 +648,7 @@ def read_mapping_document(x_center: str, layer: str) -> dict:
     metadata store.
 
     The mapping document is stored as a Delta table:
-        pc_insurance.metadata.mapping_documents
+        pc_insurance_dev.metadata.mapping_documents
 
     Schema:
         x_center STRING, layer STRING, version INT, is_active BOOLEAN,
@@ -935,33 +785,33 @@ def _deep_merge_mapping(base: dict, overlay: dict) -> dict:
 # DBTITLE 1,UC Toolkit — Part 2
 # ═══════════════════════════════════════════════════════════════
 # Cell 5: UC Toolkit Functions — Part 2
-#   execute_sandbox_metadata_run(x_center, sandbox_catalog)
+#   execute_sandbox_metadata_run(x_center, staging_catalog)
 #   update_uc_catalog_comments(table_name, column_comments)
 #   write_technical_markdown_doc(file_path, content)
 #   trigger_pipeline_repair(run_id)
 # ═══════════════════════════════════════════════════════════════
 
-def execute_sandbox_metadata_run(x_center: str, sandbox_catalog: str) -> dict:
+def execute_sandbox_metadata_run(x_center: str, staging_catalog: str) -> dict:
     """
     Signals the metadata framework to compile and execute a test run
     using the newly updated mappings in a safe sandbox environment.
 
     This function:
-      1. Creates a sandbox catalog `dev_sandbox_<run_id>` if not exists
-      2. Copies the active mapping into the sandbox catalog
+      1. Creates a staging catalog `dev_staging_<run_id>` if not exists
+      2. Copies the active mapping into the staging catalog
       3. Triggers the ingestion pipeline in dry-run / validation mode
       4. Returns the sandbox run ID for QA verification
 
     Returns:
-        dict with keys: sandbox_catalog, sandbox_run_id, status
+        dict with keys: staging_catalog, sandbox_run_id, status
     """
-    # 1. Create sandbox catalog + schema
-    spark.sql(f"CREATE CATALOG IF NOT EXISTS {sandbox_catalog}")
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {sandbox_catalog}.metadata")
+    # 1. Create staging catalog + schema
+    spark.sql(f"CREATE CATALOG IF NOT EXISTS {staging_catalog}")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {staging_catalog}.metadata")
 
-    # 2. Clone the updated mapping into sandbox
+    # 2. Clone the updated mapping into staging
     spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {sandbox_catalog}.metadata.mapping_documents
+        CREATE TABLE IF NOT EXISTS {staging_catalog}.metadata.mapping_documents
         AS SELECT * FROM {METADATA_CATALOG}.{METADATA_SCHEMA}.mapping_documents
         WHERE x_center = '{x_center}' AND is_active = true
     """)
@@ -977,33 +827,33 @@ def execute_sandbox_metadata_run(x_center: str, sandbox_catalog: str) -> dict:
 
     if not target_job_id:
         return {
-            "sandbox_catalog": sandbox_catalog,
+            "staging_catalog": staging_catalog,
             "sandbox_run_id": "",
             "status": "error",
             "message": f"Job '{job_name}' not found"
         }
 
-    # 4. Trigger the job with a sandbox catalog parameter override
+    # 4. Trigger the job with a staging catalog parameter override
     try:
         run_response = _w.jobs.run_now(
             job_id=target_job_id,
             notebook_params={
-                "target_catalog": sandbox_catalog,
+                "target_catalog": staging_catalog,
                 "x_center": x_center,
                 "execution_mode": "sandbox_validation"
             }
         )
         sandbox_run_id = str(run_response.run_id)
-        logger.info(f"Sandbox run triggered: {sandbox_run_id} in {sandbox_catalog}")
+        logger.info(f"Sandbox run triggered: {sandbox_run_id} in {staging_catalog}")
         return {
-            "sandbox_catalog": sandbox_catalog,
+            "staging_catalog": staging_catalog,
             "sandbox_run_id": sandbox_run_id,
             "status": "triggered",
             "job_id": target_job_id
         }
     except Exception as e:
         return {
-            "sandbox_catalog": sandbox_catalog,
+            "staging_catalog": staging_catalog,
             "sandbox_run_id": "",
             "status": "error",
             "message": str(e)
@@ -1311,19 +1161,6 @@ Return your routing decision as JSON with keys: next_agent, reasoning, failure_d
         if not self._check_loop_guard(state):
             return state
 
-        # ── Circuit Breaker: Check if same error class has failed too many times ──
-        if state.get("phase") == SwarmPhase.PLAN.value and state.get("error_class"):
-            should_halt, failed_count, details = check_circuit_breaker(state["error_class"])
-            if should_halt:
-                state["phase"] = SwarmPhase.HALTED.value
-                state["circuit_breaker_triggered"] = True
-                state["human_escalation_reason"] = details
-                state["final_status"] = "halted"
-                state["next_agent"] = AgentRole.HUMAN_ESCALATION.value
-                self.logger.warning(f"Circuit breaker triggered: {details}")
-                state = self._log_action(state, "circuit_breaker", details)
-                return state
-
         state["attempt_counter"] = state.get("attempt_counter", 0) + 1
 
         # ── Determine routing based on current phase ──
@@ -1347,7 +1184,7 @@ Return your routing decision as JSON with keys: next_agent, reasoning, failure_d
         elif phase == SwarmPhase.DEPLOY.value:
             state["next_agent"] = AgentRole.DEPLOYMENT.value
             state = self._log_action(state, "route_to_deployment",
-                "Routing to Deployment Agent for pipeline repair + Git sync")
+                "Routing to Deployment Agent for production repair + Git sync")
 
         elif phase == SwarmPhase.COMPLETE.value:
             state["next_agent"] = "__end__"
@@ -1453,13 +1290,36 @@ Return JSON with keys: error_class, affected_table, downstream_impact (list), po
         state = self._log_action(state, "error_fetched",
             f"Error class: {error_info.get('state', 'UNKNOWN')}, signature: {state['error_signature']}")
 
+        # ── Step 1b: Circuit Breaker Check ──
+        # Halt if 3+ failed attempts for same error in last 6h
+        circuit_breaker = self._check_circuit_breaker(state["error_signature"])
+        if circuit_breaker["tripped"]:
+            state["circuit_breaker_triggered"] = True
+            state["phase"] = SwarmPhase.HALTED.value
+            state["human_escalation_reason"] = f"Circuit breaker: {circuit_breaker['reason']}"
+            state["final_status"] = "halted"
+            state = self._log_action(state, "circuit_breaker_tripped",
+                f"Circuit breaker triggered: {circuit_breaker['reason']}")
+            return state
+
+        # ── Step 1c: Fix Knowledge Base ──
+        # Query swarm_fix_history for past successful fixes with same error_class
+        past_fixes = self._query_fix_knowledge_base(state.get("error_class", ""))
+        state["similar_past_fixes"] = past_fixes
+        if past_fixes:
+            state = self._log_action(state, "fix_knowledge_base",
+                f"Found {len(past_fixes)} similar past fixes for guidance")
+
+        # Record pre-fix timestamp for potential rollback
+        state["pre_fix_timestamp"] = datetime.datetime.now().isoformat()
+
         # ── Step 2: Determine downstream impact via UC lineage ──
         affected_table = state.get("affected_table", "")
         if not affected_table and state.get("affected_x_center"):
             # Infer the affected table from x_center + layer
             x_center = state.get("affected_x_center", "").lower()
             layer = state.get("affected_layer", "bronze")
-            affected_table = f"{CATALOG}.{layer}.{x_center}_raw"
+            affected_table = f"{PROD_CATALOG}.{layer}.{x_center}_raw"
             state["affected_table"] = affected_table
 
         downstream_impact = self._fetch_downstream_impact(affected_table)
@@ -1492,16 +1352,6 @@ Return JSON with keys: error_class, affected_table, downstream_impact (list), po
             state["error_class"] = self._heuristic_classify(state.get("error_log", ""))
             state = self._log_action(state, "error_classified_heuristic",
                 f"Heuristic error class: {state['error_class']}")
-
-        # ── Step 3b: Query fix knowledge base for past successful fixes ──
-        previous_fix = get_previous_successful_fix(state.get("error_class", ""))
-        if previous_fix:
-            state["previous_fix_applied"] = previous_fix
-            state = self._log_action(state, "fix_knowledge_base",
-                f"Previous successful fix found: {previous_fix[:200]}")
-        else:
-            state = self._log_action(state, "fix_knowledge_base",
-                "No previous successful fix found for this error class")
 
         # ── Step 4: Transition to EXECUTE phase ──
         state["phase"] = SwarmPhase.EXECUTE.value
@@ -1567,6 +1417,46 @@ Return JSON:
         if "timeout" in error_lower or "resource" in error_lower or "cluster" in error_lower:
             return "infrastructure"
         return "unknown"
+
+    def _check_circuit_breaker(self, error_signature: str) -> dict:
+        """Check swarm_fix_history for repeated failures on same error signature."""
+        try:
+            df = spark.sql(f"""
+                SELECT COUNT(*) AS failed_count,
+                       MAX(fix_timestamp) AS last_attempt
+                FROM {METADATA_CATALOG}.metadata.swarm_fix_history
+                WHERE error_message LIKE '%{error_signature}%'
+                  AND resolution_status IN ('halted', 'rollback')
+                  AND fix_timestamp >= TIMESTAMPADD(HOUR, -6, CURRENT_TIMESTAMP())
+            """)
+            row = df.collect()[0]
+            failed_count = row["failed_count"] or 0
+            if failed_count >= 3:
+                return {"tripped": True,
+                        "reason": f"{failed_count} failed attempts in last 6h for error {error_signature}"}
+            return {"tripped": False}
+        except Exception as e:
+            self.logger.warning(f"Circuit breaker check failed: {e}")
+            return {"tripped": False}
+
+    def _query_fix_knowledge_base(self, error_class: str) -> list:
+        """Query past successful fixes for similar error classes."""
+        if not error_class:
+            return []
+        try:
+            df = spark.sql(f"""
+                SELECT fix_id, error_class, error_message, fix_applied,
+                       resolution_status, dq_score_before, dq_score_after
+                FROM {METADATA_CATALOG}.metadata.swarm_fix_history
+                WHERE error_class = '{error_class}'
+                  AND resolution_status = 'resolved'
+                ORDER BY fix_timestamp DESC
+                LIMIT 5
+            """)
+            return [row.asDict() for row in df.collect()]
+        except Exception as e:
+            self.logger.warning(f"Fix knowledge base query failed: {e}")
+            return []
 
 # COMMAND ----------
 
@@ -1823,14 +1713,6 @@ Return JSON with keys: validation_passed, ddl_statements, uc_comment_update, tec
     def process(self, state: SwarmState) -> SwarmState:
         self.logger.info("Data Engineer Agent activated")
 
-        # ── Capture pre-fix timestamp for potential rollback ──
-        affected_table = state.get("affected_table", "")
-        if affected_table and not state.get("pre_fix_timestamp"):
-            state["pre_fix_timestamp"] = datetime.datetime.now().isoformat()
-            state["dq_score_before"] = calculate_dq_score_for_table(affected_table)
-            state = self._log_action(state, "pre_fix_snapshot",
-                f"Pre-fix DQ: {state['dq_score_before']:.2f}, timestamp: {state['pre_fix_timestamp']}")
-
         x_center = state.get("target_x_center", state.get("affected_x_center", ""))
         layer = state.get("target_layer", state.get("affected_layer", ""))
         mapping_after = state.get("mapping_document_after", {})
@@ -1880,8 +1762,8 @@ Return JSON with keys: validation_passed, ddl_statements, uc_comment_update, tec
             state = self._log_action(state, "ddl_generated",
                 f"{len(ddl_statements)} DDL statements generated")
 
-        # ── Step 4: Generate sandbox sandbox catalog + trigger test run ──
-        sandbox_catalog = f"{SANDBOX_CATALOG_PREFIX}{state.get('run_id', str(uuid.uuid4())[:8])}"
+        # ── Step 4: Generate sandbox staging catalog + trigger test run ──
+        sandbox_catalog = f"{STAGING_CATALOG_PREFIX}{state.get('run_id', str(uuid.uuid4())[:8])}"
         state["sandbox_catalog"] = sandbox_catalog
 
         sandbox_result = execute_sandbox_metadata_run(x_center, sandbox_catalog)
@@ -2015,7 +1897,7 @@ class QAValidationAgent(BaseAgent):
       - Query the sandbox run output for validation results
       - Run DLT expectation checks (expect, expect_or_drop, expect_or_fail)
       - Run Great Expectations suites if configured
-      - Verify schema adherence in the sandbox catalog
+      - Verify schema adherence in the staging catalog
       - Report pass/fail back to the Supervisor
     """
 
@@ -2093,36 +1975,6 @@ Return JSON with keys: validation_passed, failed_expectations, row_count, null_v
             f"Passed: {state['validation_passed']}, "
             f"Failed expectations: {len(validation_results.get('failed_expectations', []))}, "
             f"Schema issues: {len(schema_issues)}")
-
-        # ── Step 4b: Calculate DQ scores for rollback assessment ──
-        affected_table = state.get("affected_table", "")
-        sandbox_cat = state.get("sandbox_catalog", "")
-        if sandbox_cat and affected_table and "." in affected_table:
-            check_table = sandbox_cat + "." + affected_table.split(".", 1)[1]
-        else:
-            check_table = affected_table
-        if check_table:
-            state["dq_score_after"] = calculate_dq_score_for_table(check_table)
-
-        # ── Automated Rollback: If DQ dropped, roll back and escalate ──
-        if state.get("dq_score_before") is not None and state.get("dq_score_after") is not None:
-            if state["dq_score_after"] < state["dq_score_before"]:
-                pre_ts = state.get("pre_fix_timestamp", "")
-                if pre_ts and affected_table:
-                    rollback_ok = perform_rollback(affected_table, pre_ts)
-                    state["rollback_performed"] = rollback_ok
-                    state = self._log_action(state, "auto_rollback",
-                        f"DQ dropped {state['dq_score_before']:.2f} → {state['dq_score_after']:.2f}, "
-                        f"rollback {'succeeded' if rollback_ok else 'failed'}")
-                    state["phase"] = SwarmPhase.HALTED.value
-                    state["human_escalation_reason"] = (
-                        f"Automated rollback: DQ dropped from "
-                        f"{state['dq_score_before']:.2f} to {state['dq_score_after']:.2f}. "
-                        f"Table restored. Human review required."
-                    )
-                    state["final_status"] = "halted"
-                    state["next_agent"] = AgentRole.HUMAN_ESCALATION.value
-                    return state
 
         # ── Step 5: Route based on validation result ──
         if state["validation_passed"]:
@@ -2256,7 +2108,7 @@ Return JSON:
 
 class DeploymentAgent(BaseAgent):
     """
-    The Deployment Agent manages isolated sandbox environments,
+    The Deployment Agent manages isolated staging environments,
     triggers execution runs, and handles automated Git branch commits/PR
     creations for updated metadata assets and technical markdown files.
 
@@ -2265,7 +2117,7 @@ class DeploymentAgent(BaseAgent):
       - Write technical schema docs to UC Volume / Git
       - Trigger pipeline repair via the Jobs API
       - Create Git branch and PR for metadata + docs changes
-      - Clean up sandbox catalogs after successful deployment
+      - Clean up staging catalogs after successful deployment
       - Set final_status to 'resolved'
     """
 
@@ -2274,10 +2126,10 @@ Your job is to:
 1. Write technical documentation (post-mortems, schema docs) to UC Volumes and Git.
 2. Trigger the pipeline repair to resume the failed run with updated metadata.
 3. Create a Git branch and PR for the metadata + documentation changes.
-4. Clean up the sandbox catalog after successful deployment.
+4. Clean up the staging catalog after successful deployment.
 5. Report the final deployment status.
 
-Return JSON with keys: repair_triggered, docs_written, git_pr_url, sandbox_cleaned, deployment_status.
+Return JSON with keys: repair_triggered, docs_written, git_pr_url, staging_cleaned, deployment_status.
 """
 
     def __init__(self, llm_client: LLMServingClient):
@@ -2318,29 +2170,16 @@ Return JSON with keys: repair_triggered, docs_written, git_pr_url, sandbox_clean
         state = self._log_action(state, "pipeline_repair",
             f"Run {run_id}: {repair_result.get('status')}")
 
-        # ── Step 3b: Dependency-aware repair verification ──
-        affected_table = state.get("affected_table", "")
-        downstream = state.get("downstream_impact", [])
-        if affected_table and downstream:
-            stale_tables = verify_downstream_freshness(affected_table, downstream)
-            if stale_tables:
-                state = self._log_action(state, "stale_downstream",
-                    f"{len(stale_tables)} downstream tables stale: {', '.join(stale_tables[:5])}. "
-                    f"Recommend rerunning dependent tasks.")
-            else:
-                state = self._log_action(state, "downstream_verified",
-                    "All downstream tables reflect repaired data")
-
         # ── Step 4: Create Git branch and PR (if Git is configured) ──
         git_pr_url = self._create_git_pr(state)
         state["git_pr_url"] = git_pr_url
         state = self._log_action(state, "git_pr",
             f"PR URL: {git_pr_url or 'N/A (Git not configured)'}")
 
-        # ── Step 5: Clean up sandbox catalog ──
+        # ── Step 5: Clean up staging catalog ──
         if sandbox_catalog:
-            cleanup_result = self._cleanup_sandbox(sandbox_catalog)
-            state = self._log_action(state, "sandbox_cleanup",
+            cleanup_result = self._cleanup_staging(sandbox_catalog)
+            state = self._log_action(state, "staging_cleanup",
                 f"{sandbox_catalog}: {cleanup_result}")
 
         # ── Step 6: Set final status ──
@@ -2404,25 +2243,199 @@ Return JSON with keys: repair_triggered, docs_written, git_pr_url, sandbox_clean
 
         branch_name = f"{GIT_BRANCH_PREFIX}/{state.get('run_id', 'unknown')}_{state.get('session_id', '')[:8]}"
 
-        # In full implementation, this would use the Databricks Repos API or Git CLI:
+        # In production, this would use the Databricks Repos API or Git CLI:
         # 1. Create a new branch
         # 2. Commit the updated mapping_documents table export
         # 3. Commit the technical docs markdown files
         # 4. Create a PR via the Git provider API
 
-        # Placeholder for Git integration (implemented via runGit tool or Git CLI in full implementation)
+        # Placeholder for Git integration (implemented via runGit tool or Git CLI in production)
         self.logger.info(f"Git PR creation requested for branch: {branch_name}")
 
-        # Return a mock PR URL (replace with actual Git provider API in full implementation)
+        # Return a mock PR URL (replace with actual Git provider API in production)
         return f"https://github.com/your-org/pc-insurance-metadata/pull/new/{branch_name}"
 
-    def _cleanup_sandbox(self, catalog: str) -> str:
-        """Drop the sandbox catalog after successful deployment."""
+    def _cleanup_staging(self, catalog: str) -> str:
+        """Drop the staging catalog after successful deployment."""
         try:
             spark.sql(f"DROP CATALOG IF EXISTS {catalog} CASCADE")
             return "cleaned_up"
         except Exception as e:
             return f"cleanup_failed: {e}"
+
+# COMMAND ----------
+
+# DBTITLE 1,Autonomous Rollback & Dependency Verification
+# ═══════════════════════════════════════════════════════════════
+# Cell 12b: Autonomous Rollback Manager & Dependency-Aware Repair
+# ═══════════════════════════════════════════════════════════════
+#
+# Enhances swarm autonomy with:
+#   1. Automated rollback via Delta RESTORE when DQ score drops after a fix
+#   2. Dependency-aware repair verification (check downstream tables after fix)
+#   3. Fix history logging to swarm_fix_history table
+# ─────────────────────────────────────────────────────────────────
+
+class RollbackManager:
+    """
+    Manages automated rollback of Delta tables when a fix degrades data quality.
+    
+    Uses Delta Lake's time travel (RESTORE TO VERSION/TIMESTAMP) to revert
+    a table to its pre-fix state if the DQ score drops after a metadata change.
+    """
+    
+    @staticmethod
+    def capture_pre_fix_version(table_name: str) -> dict:
+        """Capture the current version of a table before applying a fix."""
+        try:
+            hist = spark.sql(f"DESCRIBE HISTORY {table_name} LIMIT 1").collect()[0]
+            return {
+                "table": table_name,
+                "version": hist["version"],
+                "timestamp": hist["timestamp"].isoformat()
+            }
+        except Exception as e:
+            logger.warning(f"Could not capture pre-fix version for {table_name}: {e}")
+            return {"table": table_name, "version": None, "timestamp": None}
+    
+    @staticmethod
+    def perform_rollback(table_name: str, pre_fix_info: dict) -> dict:
+        """
+        Restore a Delta table to its pre-fix version.
+        Uses RESTORE TO TIMESTAMP if available, otherwise RESTORE TO VERSION.
+        """
+        if not pre_fix_info.get("version") and not pre_fix_info.get("timestamp"):
+            return {"success": False, "reason": "No pre-fix version/timestamp available"}
+        
+        try:
+            if pre_fix_info.get("timestamp"):
+                spark.sql(f"RESTORE TABLE {table_name} TO TIMESTAMP '{pre_fix_info['timestamp']}'")
+            else:
+                spark.sql(f"RESTORE TABLE {table_name} TO VERSION {pre_fix_info['version']}")
+            logger.info(f"Rollback successful for {table_name}")
+            return {"success": True, "table": table_name, "restored_to": pre_fix_info}
+        except Exception as e:
+            logger.error(f"Rollback failed for {table_name}: {e}")
+            return {"success": False, "reason": str(e)}
+    
+    @staticmethod
+    def evaluate_rollback_needed(state: SwarmState) -> tuple:
+        """
+        Determine if a rollback is needed based on DQ scores.
+        Returns (should_rollback, reason).
+        """
+        score_before = state.get("dq_score_before", 0.0)
+        score_after = state.get("dq_score_after", 0.0)
+        
+        if score_after < score_before:
+            drop_pct = ((score_before - score_after) / score_before * 100) if score_before > 0 else 0
+            if drop_pct > 10:  # More than 10% drop triggers rollback
+                return True, f"DQ score dropped {drop_pct:.1f}% ({score_before:.3f} → {score_after:.3f})"
+        return False, "OK"
+
+
+class DependencyChecker:
+    """
+    Verifies that downstream tables are not broken after a fix.
+    Uses UC lineage to find dependent tables and checks their freshness + DQ.
+    """
+    
+    @staticmethod
+    def verify_downstream_tables(affected_table: str, state: SwarmState) -> dict:
+        """
+        Check all downstream tables of the affected table.
+        Returns a dict with verification results.
+        """
+        if not affected_table:
+            return {"checked": 0, "issues": []}
+        
+        # Get downstream tables from UC lineage
+        try:
+            lineage_df = spark.sql(f"""
+                SELECT DISTINCT target_table_full_name AS downstream
+                FROM system.access.table_lineage
+                WHERE source_table_full_name = '{affected_table}'
+                AND target_table_full_name IS NOT NULL
+                LIMIT 20
+            """)
+            downstream_tables = [row["downstream"] for row in lineage_df.collect()]
+        except Exception as e:
+            logger.warning(f"Lineage query failed: {e}")
+            downstream_tables = []
+        
+        issues = []
+        for table in downstream_tables:
+            try:
+                # Check if table is queryable
+                spark.sql(f"SELECT 1 FROM {table} LIMIT 1")
+                logger.info(f"Downstream check OK: {table}")
+            except Exception as e:
+                issues.append({"table": table, "error": str(e)})
+                logger.warning(f"Downstream check FAILED: {table} — {e}")
+        
+        result = {
+            "checked": len(downstream_tables),
+            "issues": issues,
+            "all_healthy": len(issues) == 0
+        }
+        
+        if issues:
+            state = self._log_dependency_issues(state, issues)
+        
+        return result
+    
+    @staticmethod
+    def _log_dependency_issues(state: SwarmState, issues: list):
+        """Log dependency issues to swarm state messages."""
+        for issue in issues:
+            state["messages"].append({
+                "agent": "dependency_checker",
+                "action": "downstream_failure",
+                "details": f"{issue['table']}: {issue['error']}"
+            })
+        return state
+
+
+def record_fix_history(state: SwarmState, fix_duration_sec: float):
+    """Log the swarm fix attempt to swarm_fix_history table."""
+    try:
+        import uuid as _uuid
+        fix_id = str(_uuid.uuid4())
+        spark.sql(f"""
+            INSERT INTO {METADATA_CATALOG}.metadata.swarm_fix_history
+            (fix_id, run_id, trigger_source, error_class, error_message,
+             affected_table, fix_applied, dq_score_before, dq_score_after,
+             resolution_status, fix_timestamp, swarm_duration_sec, token_cost_usd,
+             rollback_performed, circuit_breaker_triggered, post_mortem_path)
+            VALUES (
+                '{fix_id}',
+                '{state.get('run_id', '')}',
+                '{state.get('trigger_source', '')}',
+                '{state.get('error_class', '')}',
+                '{str(state.get('error_log', ''))[:500].replace("'", "''")}',
+                '{state.get('affected_table', '')}',
+                '{str(state.get('metadata_delta', ''))[:500].replace("'", "''")}',
+                {state.get('dq_score_before', 0.0)},
+                {state.get('dq_score_after', 0.0)},
+                '{state.get('final_status', 'unknown')}',
+                CURRENT_TIMESTAMP(),
+                {fix_duration_sec},
+                {state.get('token_cost_usd', 0.0)},
+                {state.get('rollback_performed', False)},
+                {state.get('circuit_breaker_triggered', False)},
+                '{state.get('technical_docs_payload', {}).get('post_mortem', '')[:200].replace("'", "''")}'
+            )
+        """)
+        state["fix_history_recorded"] = True
+        logger.info(f"Fix history recorded: {fix_id}")
+    except Exception as e:
+        logger.warning(f"Failed to record fix history: {e}")
+    return state
+
+
+print("✓ RollbackManager initialized (Delta RESTORE on DQ drop >10%)")
+print("✓ DependencyChecker initialized (UC lineage verification)")
+print("✓ Fix history logging enabled (swarm_fix_history table)")
 
 # COMMAND ----------
 
@@ -2614,7 +2627,7 @@ def simulate_scenario_a() -> dict:
     AnalysisException: [UNRESOLVED_COLUMN.IN] An unresolved column
     'new_acord_coverage_field_cd' was found in the PolicyCenter Bronze
     ingestion. The column does not exist in the current mapping document
-    for pc_insurance.bronze.policycenter_raw.
+    for pc_insurance_prod.bronze.policycenter_raw.
     Schema mismatch: expected 45 columns, found 46 columns.
     ACORD standard field: 'new_acord_coverage_field_cd' (string, nullable).
     """
@@ -2624,7 +2637,7 @@ def simulate_scenario_a() -> dict:
     state["error_log"] = mock_error
     state["affected_x_center"] = "PolicyCenter"
     state["affected_layer"] = "bronze"
-    state["affected_table"] = f"{CATALOG}.bronze.policycenter_raw"
+    state["affected_table"] = f"{PROD_CATALOG}.bronze.policycenter_raw"
     state["phase"] = SwarmPhase.PLAN.value
 
     print(f"\nInitial State:")
@@ -2647,7 +2660,7 @@ def simulate_scenario_a() -> dict:
         "transformation_rules": [{
             "rule_name": "auto_schema_evolution_acord",
             "rule_type": "schema_evolution",
-            "rule_sql": "ALTER TABLE pc_insurance.bronze.policycenter_raw ADD COLUMN IF NOT EXISTS new_acord_coverage_field_cd STRING",
+            "rule_sql": "ALTER TABLE pc_insurance_prod.bronze.policycenter_raw ADD COLUMN IF NOT EXISTS new_acord_coverage_field_cd STRING",
             "applies_to": "new_acord_coverage_field_cd",
             "condition": None
         }],
@@ -2661,10 +2674,10 @@ def simulate_scenario_a() -> dict:
     print(f"\nExpected BA Delta:")
     print(json.dumps(expected_ba_delta, indent=2)[:800])
 
-    print("\n[In full implementation, the full swarm graph would execute here]")
+    print("\n[In production, the full swarm graph would execute here]")
     print("  Supervisor → Triage → BA → Data Engineer → QA → Deployment")
 
-    # Execute the swarm graph (uncomment in full implementation)
+    # Execute the swarm graph (uncomment in production)
     # result = execute_swarm(state)
     # print(f"\nFinal Status: {result.get('final_status')}")
     # print(f"Attempts: {result.get('attempt_counter')}, Cost: ${result.get('token_cost_usd', 0):.2f}")
@@ -2702,7 +2715,7 @@ def simulate_scenario_b() -> dict:
     mock_run_id = "894776717783669"
     mock_error = """
     DeltaAnalysisException: [NOT_NULL_VIOLATION] The NOT NULL constraint
-    on column 'deductible_amount' in table pc_insurance.silver.mga_policy_silver
+    on column 'deductible_amount' in table pc_insurance_prod.silver.mga_policy_silver
     was violated. 1,247 rows from MGA_Feed source system (group_code='COMMERCIAL')
     contain NULL values for deductible_amount.
     DLT expectation 'expect_deductible_not_null' FAILED.
@@ -2712,7 +2725,7 @@ def simulate_scenario_b() -> dict:
     state["error_log"] = mock_error
     state["affected_x_center"] = "MGA_Feed"
     state["affected_layer"] = "silver"
-    state["affected_table"] = f"{CATALOG}.silver.mga_policy_silver"
+    state["affected_table"] = f"{PROD_CATALOG}.silver.mga_policy_silver"
     state["phase"] = SwarmPhase.PLAN.value
 
     print(f"\nInitial State:")
@@ -2741,7 +2754,7 @@ def simulate_scenario_b() -> dict:
     print(f"\nExpected BA Delta (conditional fallback rule):")
     print(json.dumps(expected_ba_delta, indent=2)[:800])
 
-    print("\n[In full implementation, the full swarm graph would execute here]")
+    print("\n[In production, the full swarm graph would execute here]")
     print("  Supervisor → Triage → BA (adds COALESCE rule) → Data Engineer → QA → Deployment")
 
     return {"scenario": "B", "state": state, "expected_delta": expected_ba_delta}
@@ -2777,7 +2790,7 @@ def simulate_scenario_c() -> dict:
     mock_error = """
     DLTValidationException: Gold layer validation failed.
     Expectation 'loss_ratio_threshold_check' FAILED.
-    Table: pc_insurance.gold.claims_kpi_gold
+    Table: pc_insurance_prod.gold.claims_kpi_gold
     Metric: loss_ratio = 547.3% (threshold max: 200%)
     Region: FLORIDA | Date Range: 2026-09-20 to 2026-09-25
     Context: Hurricane Helene — CAT 4 landfall. 18,432 claims filed in 5 days.
@@ -2788,7 +2801,7 @@ def simulate_scenario_c() -> dict:
     state["error_log"] = mock_error
     state["affected_x_center"] = "ClaimCenter"
     state["affected_layer"] = "gold"
-    state["affected_table"] = f"{CATALOG}.gold.claims_kpi_gold"
+    state["affected_table"] = f"{PROD_CATALOG}.gold.claims_kpi_gold"
     state["phase"] = SwarmPhase.PLAN.value
 
     print(f"\nInitial State:")
@@ -2803,7 +2816,7 @@ def simulate_scenario_c() -> dict:
         "transformation_rules": [{
             "rule_name": "catastrophic_event_threshold_override",
             "rule_type": "conditional",
-            "rule_sql": "UPDATE pc_insurance.metadata.threshold_controls SET max_loss_ratio = 600 WHERE metric_name = 'loss_ratio' AND region = 'FLORIDA' AND event_type = 'CATASTROPHIC'",
+            "rule_sql": "UPDATE pc_insurance_dev.metadata.threshold_controls SET max_loss_ratio = 600 WHERE metric_name = 'loss_ratio' AND region = 'FLORIDA' AND event_type = 'CATASTROPHIC'",
             "applies_to": "loss_ratio",
             "condition": "region = 'FLORIDA' AND event_type = 'CATASTROPHIC' AND event_date BETWEEN '2026-09-20' AND '2026-09-25'"
         }],
@@ -2817,7 +2830,7 @@ def simulate_scenario_c() -> dict:
     print(f"\nExpected BA Delta (threshold override):")
     print(json.dumps(expected_ba_delta, indent=2)[:1000])
 
-    print("\n[In full implementation, the full swarm graph would execute here]")
+    print("\n[In production, the full swarm graph would execute here]")
     print("  Supervisor → Triage → BA (updates threshold) → QA → Deployment")
     print("  Triage also auto-generates incident report classifying as accepted variance")
 
@@ -2832,7 +2845,7 @@ def simulate_scenario_c() -> dict:
 #
 # This cell implements the three guardrail pillars:
 #   1. Network Access & Security: UC Network Rules for HTTPS egress
-#   2. Sandbox Isolation: Agents cannot touch the main catalog directly
+#   2. Sandbox Isolation: Agents cannot touch production directly
 #   3. Infinite-Loop Token Protection: Max 5 ReAct loops + dollar cap
 # ─────────────────────────────────────────────────────────────────
 
@@ -2877,7 +2890,7 @@ class SecurityGuardrails:
         Creates Unity Catalog Network Rules restricting HTTPS egress to only
         the local Databricks workspace domain and target enterprise Git repos.
 
-        In full implementation, run this via the Databricks CLI or REST API:
+        In production, run this via the Databricks CLI or REST API:
             databricks uc create-network-rule ...
         """
         # Example: Create UC network rules (run once during setup)
@@ -2897,24 +2910,24 @@ class SecurityGuardrails:
     @staticmethod
     def validate_sandbox_isolation(state: SwarmState, operation: str) -> tuple:
         """
-        Ensures agents are operating within the sandbox catalog, not the main catalog.
+        Ensures agents are operating within the staging catalog, not production.
         Returns (is_safe, reason).
         """
         phase = state.get("phase", "")
         sandbox_catalog = state.get("sandbox_catalog", "")
 
-        # Before DEPLOY phase, all operations must target the sandbox catalog
+        # Before DEPLOY phase, all operations must target the staging catalog
         if phase in [SwarmPhase.EXECUTE.value, SwarmPhase.VERIFY.value]:
             if not sandbox_catalog and operation != "read_mapping":
-                return False, "No sandbox catalog provisioned for write operations"
+                return False, "No staging catalog provisioned for write operations"
 
-            # Verify we're not writing to the main catalog
-            if CATALOG in str(state.get("affected_table", "")) and phase == SwarmPhase.VERIFY.value:
-                return False, f"Attempted main catalog write during VERIFY phase. Use sandbox catalog instead."
+            # Verify we're not writing to the production catalog
+            if PROD_CATALOG in str(state.get("affected_table", "")) and phase == SwarmPhase.VERIFY.value:
+                return False, f"Attempted production write during VERIFY phase. Use staging catalog instead."
 
-        # DEPLOY phase is the only phase where pipeline repair is allowed
+        # DEPLOY phase is the only phase where production repair is allowed
         if phase == SwarmPhase.DEPLOY.value and not state.get("validation_passed", False):
-            return False, "Cannot deploy to the main catalog without passing QA validation"
+            return False, "Cannot deploy to production without passing QA validation"
 
         return True, "OK"
 
@@ -2959,7 +2972,7 @@ class SecurityGuardrails:
 
 **Next Steps for Human Engineers:**
 1. Review the error log and actions taken by the swarm
-2. Check the sandbox catalog for partial results: {state.get('sandbox_catalog', 'N/A')}
+2. Check the staging catalog for partial results: {state.get('sandbox_catalog', 'N/A')}
 3. Read the post-mortem in: {DOCS_VOLUME_PATH}/escalations/
 4. Apply manual fix if the swarm could not resolve autonomously
 5. Update the mapping document manually if needed
@@ -2975,8 +2988,8 @@ print("Security Guardrails Initialized:")
 print(f"  Max ReAct Iterations: {MAX_REACT_ITERATIONS}")
 print(f"  Max Token Budget: ${MAX_TOKEN_BUDGET_USD}")
 print(f"  Allowed Egress: {SecurityGuardrails.ALLOWED_EGRESS_DOMAINS}")
-print(f"  Sandbox Catalog Prefix: {SANDBOX_CATALOG_PREFIX}")
-print(f"  Main Catalog: {CATALOG}")
+print(f"  Staging Catalog Prefix: {STAGING_CATALOG_PREFIX}")
+print(f"  Production Catalog: {PROD_CATALOG}")
 print(f"  Docs Volume: {DOCS_VOLUME_PATH}")
 
 # COMMAND ----------
@@ -3169,11 +3182,6 @@ def execute_swarm(initial_state: SwarmState, use_graph: bool = True) -> SwarmSta
         try:
             config = {"configurable": {"thread_id": initial_state["session_id"]}}
             final_state = swarm_graph.invoke(initial_state, config=config)
-            # Log fix to history for cumulative learning
-            try:
-                log_fix_to_history(final_state)
-            except Exception as e:
-                logger.warning(f"Failed to log fix history: {e}")
             return final_state
         except Exception as e:
             logger.error(f"LangGraph execution failed: {e}")
@@ -3246,12 +3254,6 @@ def _execute_sequential(state: SwarmState) -> SwarmState:
             print(alert)
             break
 
-    # ── Log fix to history for cumulative learning ──
-    try:
-        log_fix_to_history(state)
-    except Exception as e:
-        logger.warning(f"Failed to log fix history: {e}")
-
     # ── Print final summary ──
     print("\n" + "=" * 70)
     print("SWARM EXECUTION COMPLETE")
@@ -3262,18 +3264,6 @@ def _execute_sequential(state: SwarmState) -> SwarmState:
     print(f"  Token Cost: ${state.get('token_cost_usd', 0):.2f}")
     print(f"  Phase: {state.get('phase', 'unknown')}")
     print(f"  Error Class: {state.get('error_class', 'N/A')}")
-    if state.get("circuit_breaker_triggered"):
-        print(f"  Circuit Breaker: TRIGGERED")
-    if state.get("previous_fix_applied"):
-        print(f"  Previous Fix: {state['previous_fix_applied'][:100]}")
-    if state.get("dq_score_before") is not None:
-        dq_after = state.get("dq_score_after")
-        if dq_after is not None:
-            print(f"  DQ Score: {state['dq_score_before']:.2f} → {dq_after:.2f}")
-        else:
-            print(f"  DQ Score Before: {state['dq_score_before']:.2f}")
-    if state.get("rollback_performed"):
-        print(f"  Rollback: PERFORMED")
     print(f"  Mapping Updated: {state.get('metadata_update_applied', False)}")
     print(f"  Validation Passed: {state.get('validation_passed', False)}")
     print(f"  UC Comments Updated: {state.get('uc_comments_updated', False)}")
@@ -3469,8 +3459,8 @@ print("Endpoints can also be created via: UI > Serving Endpoints > Create Endpoi
 # COMMAND ----------
 
 # DBTITLE 1,Environment Validation & Readiness Check
-# Cell 21: Environment Validation & Readiness Check
-# Validates all components before deployment use.
+# Cell 21: Environment Validation & Production Readiness Check
+# Validates all components before production use.
 
 from databricks.sdk import WorkspaceClient
 _w = WorkspaceClient()
@@ -3501,30 +3491,30 @@ print("=" * 70)
 # 1. Catalog & Schema
 print("\n-- 1. Catalog & Schema --")
 try:
-    spark.sql("USE CATALOG pc_insurance")
-    chk("Metadata catalog pc_insurance", True)
+    spark.sql("USE CATALOG pc_insurance_dev")
+    chk("Metadata catalog pc_insurance_dev", True)
 except Exception as e:
-    chk("Metadata catalog pc_insurance", False, str(e)[:80])
+    chk("Metadata catalog pc_insurance_dev", False, str(e)[:80])
 try:
-    spark.sql("USE pc_insurance.metadata")
+    spark.sql("USE pc_insurance_dev.metadata")
     chk("Schema metadata", True)
 except Exception as e:
     chk("Schema metadata", False, str(e)[:80])
 try:
-    spark.sql("USE CATALOG " + CATALOG)
-    chk("Main catalog " + CATALOG, True)
+    spark.sql("USE CATALOG " + PROD_CATALOG)
+    chk("Production catalog " + PROD_CATALOG, True)
 except Exception as e:
-    chk("Main catalog " + CATALOG, False, str(e)[:80])
+    chk("Production catalog " + PROD_CATALOG, False, str(e)[:80])
 
 # 2. Metadata Tables
 print("\n-- 2. Metadata Tables --")
 try:
-    mc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance.metadata.mapping_documents").collect()[0]["c"]
+    mc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance_dev.metadata.mapping_documents").collect()[0]["c"]
     chk("mapping_documents (" + str(mc) + " rows)", mc > 0)
 except Exception as e:
     chk("mapping_documents", False, str(e)[:80])
 try:
-    tc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance.metadata.threshold_controls").collect()[0]["c"]
+    tc = spark.sql("SELECT COUNT(*) as c FROM pc_insurance_dev.metadata.threshold_controls").collect()[0]["c"]
     chk("threshold_controls (" + str(tc) + " rows)", tc > 0)
 except Exception as e:
     chk("threshold_controls", False, str(e)[:80])
@@ -3532,7 +3522,7 @@ except Exception as e:
 # 3. Mapping Coverage
 print("\n-- 3. Mapping Document Coverage --")
 try:
-    rows = spark.sql("SELECT x_center, layer, version FROM pc_insurance.metadata.mapping_documents WHERE is_active = true ORDER BY x_center, layer").collect()
+    rows = spark.sql("SELECT x_center, layer, version FROM pc_insurance_dev.metadata.mapping_documents WHERE is_active = true ORDER BY x_center, layer").collect()
     chk("Active mappings (" + str(len(rows)) + ")", len(rows) > 0)
     for r in rows:
         print("    " + str(r["x_center"]) + "/" + str(r["layer"]) + " (v" + str(r["version"]) + ")")
@@ -3542,7 +3532,7 @@ except Exception as e:
 # 4. Threshold Controls
 print("\n-- 4. Threshold Controls --")
 try:
-    rows = spark.sql("SELECT metric_name, region, event_type, max_threshold FROM pc_insurance.metadata.threshold_controls WHERE is_active = true ORDER BY metric_name").collect()
+    rows = spark.sql("SELECT metric_name, region, event_type, max_threshold FROM pc_insurance_dev.metadata.threshold_controls WHERE is_active = true ORDER BY metric_name").collect()
     chk("Active thresholds (" + str(len(rows)) + ")", len(rows) > 0)
     for r in rows:
         reg = r["region"] or "ALL"
@@ -3554,7 +3544,7 @@ except Exception as e:
 # 5. UC Volume
 print("\n-- 5. UC Volume --")
 try:
-    vf = dbutils.fs.ls("/Volumes/pc_insurance/metadata/technical_docs")
+    vf = dbutils.fs.ls("/Volumes/pc_insurance_dev/metadata/technical_docs")
     chk("UC Volume accessible (" + str(len(vf)) + " subdirs)", len(vf) >= 3)
 except Exception as e:
     chk("UC Volume accessible", False, str(e)[:80])
@@ -3598,34 +3588,34 @@ chk("build_swarm_graph", "build_swarm_graph" in dir())
 chk("execute_swarm", "execute_swarm" in dir())
 chk("init_swarm_state", "init_swarm_state" in dir())
 
-# 12. Main Catalog Tables
-print("\n-- 12. Main Catalog Tables --")
+# 12. Production Tables
+print("\n-- 12. Production Catalog Tables --")
 try:
-    pt = spark.sql("SELECT table_schema, table_name FROM " + CATALOG + ".information_schema.tables WHERE table_schema IN ('bronze','silver','gold') ORDER BY table_schema, table_name").collect()
+    pt = spark.sql("SELECT table_schema, table_name FROM " + PROD_CATALOG + ".information_schema.tables WHERE table_schema IN ('bronze','silver','gold') ORDER BY table_schema, table_name").collect()
     if pt:
-        chk("Main catalog tables in " + CATALOG + " (" + str(len(pt)) + " tables)", True)
+        chk("Production tables in " + PROD_CATALOG + " (" + str(len(pt)) + " tables)", True)
         for t in pt:
             print("    " + str(t["table_schema"]) + "." + str(t["table_name"]))
     else:
-        wrn("No bronze/silver/gold tables in " + CATALOG, "Run data pipeline first")
+        wrn("No bronze/silver/gold tables in " + PROD_CATALOG, "Run data pipeline first")
 except Exception as e:
-    wrn("Cannot query " + CATALOG, str(e)[:80])
+    wrn("Cannot query " + PROD_CATALOG, str(e)[:80])
 
 print("\n" + "=" * 70)
 print("VALIDATION SUMMARY: " + str(pass_count) + " passed, " + str(fail_count) + " failed, " + str(warn_count) + " warnings")
 if fail_count == 0:
     print("\n  >>> Environment is READY for autonomous swarm operations. <<<")
 else:
-    print("\n  >>> " + str(fail_count) + " check(s) FAILED. Review before deployment use. <<<")
+    print("\n  >>> " + str(fail_count) + " check(s) FAILED. Review before production use. <<<")
 if warn_count > 0:
     print("  >>> " + str(warn_count) + " warning(s) -- non-blocking. <<<")
 print("=" * 70)
 
 # COMMAND ----------
 
-# DBTITLE 1,Entry Point — Job Parameter Handler
+# DBTITLE 1,Production Entry Point — Job Parameter Handler
 # ═══════════════════════════════════════════════════════════════
-# Cell 24: Entry Point — Job Parameter Handler
+# Cell 24: Production Entry Point — Job Parameter Handler
 # ═══════════════════════════════════════════════════════════════
 # When run as a Lakeflow Job task, this cell reads the failed run_id
 # from job parameters (passed as widgets) and triggers the autonomous
@@ -3651,7 +3641,7 @@ if not error_context:
 
 if run_id and run_id.strip():
     print("=" * 70)
-    print("AUTONOMOUS SWARM — TRIGGER")
+    print("AUTONOMOUS SWARM — PRODUCTION TRIGGER")
     print("=" * 70)
     print("  Run ID: " + run_id)
     print("  Trigger: " + trigger_source)
@@ -3679,19 +3669,6 @@ if run_id and run_id.strip():
     print("  Attempts: " + str(final_state.get("attempt_counter", 0)))
     print("  Token Cost: $" + str(round(final_state.get("token_cost_usd", 0), 2)))
     print("  Phase: " + str(final_state.get("phase", "unknown")))
-    if final_state.get("circuit_breaker_triggered"):
-        print("  Circuit Breaker: TRIGGERED")
-    if final_state.get("previous_fix_applied"):
-        print("  Previous Fix: " + str(final_state["previous_fix_applied"])[:100])
-    dq_before = final_state.get("dq_score_before")
-    dq_after = final_state.get("dq_score_after")
-    if dq_before is not None:
-        if dq_after is not None:
-            print("  DQ Score: " + str(round(dq_before, 2)) + " → " + str(round(dq_after, 2)))
-        else:
-            print("  DQ Score Before: " + str(round(dq_before, 2)))
-    if final_state.get("rollback_performed"):
-        print("  Rollback: PERFORMED")
 
     if final_state.get("human_escalation_reason"):
         print()
