@@ -12,7 +12,7 @@ variables:
   sql_warehouse_id:
     default: 670b9d31fd290bb2
   supervisor_endpoint:
-    default: mas-05a49b97-endpoint
+    default: mas-3fcb11f6-endpoint
   workspace_root:
     default: /Users/vedavyas.goparaju@gmail.com/InsuranceModel
   allowed_roots:
@@ -27,12 +27,3 @@ targets:
     workspace:
       host: https://dbc-ec4d2e3d-58c3.cloud.databricks.com
 
-  staging:
-    mode: production
-    workspace:
-      profile: staging
-
-  prod:
-    mode: production
-    workspace:
-      profile: prod

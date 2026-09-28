@@ -194,22 +194,6 @@ pc-insurance-medallion/
 8. **Query KPIs**: Use Analyst Genie Space or query Gold tables directly
 
 > **See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed step-by-step deployment instructions**, including environment setup, agent deployment, MCP app configuration, post-deployment validation, rollback procedures, and troubleshooting.
-
-## Deploying to Another Environment
-
-The same Git commit can be deployed to `dev`, `staging`, or `prod`.
-
-```bash
-databricks bundle deploy -t staging \
-  --var sql_warehouse_id=<staging-warehouse-id> \
-  --var supervisor_endpoint=<staging-supervisor-endpoint> \
-  --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
-  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
-```
-
-Use the same command with `-t prod` and production values for production.
-
 ## Repository
 
 - **GitHub**: https://github.com/vedavyasgoparaju/pc-insurance-medallion

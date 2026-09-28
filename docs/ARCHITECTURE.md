@@ -349,7 +349,7 @@ The swarm uses a **Plan-Execute-Verify-Deploy** loop with 6 specialized agents:
 - Max 5 ReAct iterations per agent
 - $25 token budget per swarm run
 - UC Network Rules enforced
-- Sandbox isolation (prefix `dev_staging_`)
+- Sandbox isolation (prefix `dev_sandbox_`)
 
 ### Trigger Paths
 
@@ -417,6 +417,38 @@ The project uses 2 jobs with distinct purposes:
 
 **Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app.
 
+### Agent Setup Job (Job 1)
+
+**Job Name**: `PC_Insurance_Agent_Setup`
+**Job ID**: `820361677269451`
+**Run**: Manual (run once after UC setup is complete)
+**Duration**: ~20 minutes
+
+**Execution Pattern**: 8 tasks run in parallel, then 1 dependent task runs after all 8 complete.
+
+#### Parallel Tasks (1-8)
+
+| # | Task Name | Description | Timeout |
+|---|---|---|---|
+| 1 | `architect_agent` | Registers the Architect Agent as an MLflow pyfunc model, creates serving endpoint `pc_architect_agent` (Small workload, scale-to-zero) | 10 min |
+| 2 | `data_engineer_agent` | Registers the Data Engineer Agent as an MLflow pyfunc model, creates serving endpoint `pc_data_engineer_agent` (Small workload, scale-to-zero) | 10 min |
+| 3 | `domain_expert_setup` | Creates UC volume `pc_insurance.reference.pc_domain_docs`, uploads P&C domain documents, creates a Knowledge Assistant (Instructed Retriever) over the volume | 10 min |
+| 4 | `analyst_genie_setup` | Adds column-level comments to all Gold layer tables for Genie, creates Genie Space `PC_Insurance_Analyst` with all 6 Gold tables and example queries | 10 min |
+| 5 | `swarm_setup` | Provisions swarm infrastructure: creates `pc_insurance_dev` catalog + `metadata` schema, creates `mapping_documents` and `threshold_controls` tables, seeds baseline data, validates LLM endpoint availability | 10 min |
+| 6 | `dq_functions_setup` | Registers 7 persistent DQ SQL functions in `pc_insurance.dq` via `swarm/PC_Insurance_DQ_Functions_Setup.py` (`check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`, `calculate_dq_score`) | 5 min |
+| 7 | `toolkit_functions_setup` | Registers 7 persistent UC toolkit SQL functions in `pc_insurance_dev.metadata` via `swarm/PC_Insurance_Toolkit_Functions_Registration.py` (all use `to_json(named_struct(...))` syntax) | 5 min |
+| 8 | `mcp_app_deploy` | Deploys the MCP app `pc-insurance-workspace-actions` from `app/app.py`, configures SQL warehouse, service principal, and secret scope access | 10 min |
+
+#### Dependent Task (9)
+
+| # | Task Name | Description | Depends On | Timeout |
+|---|---|---|---|---|
+| 9 | `supervisor_agent_setup` | Creates the Supervisor Agent ("P&C Insurance Medallion Architecture Team") with all 8 tools registered (7 subagents + 1 MCP app), configures anti-routing rules, validates endpoint readiness (ID: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`, endpoint: `mas-3fcb11f6-endpoint`) | 1-8 (all must succeed) | 10 min |
+
+**Task Failure Handling**: If any parallel task (1-8) fails, the Supervisor Agent setup (task 9) is skipped. The job can be re-run after fixing the failing task. All tasks are idempotent (safe to re-run).
+
+**Trigger**: Run via the Databricks UI (Jobs > PC_Insurance_Agent_Setup > Run Now) or CLI (`databricks jobs run-now` with job ID `820361677269451`).
+
 ### Data Pipeline Job (Job 2)
 
 **Job Name**: `PC_Insurance_Data_Pipeline`
@@ -459,7 +491,7 @@ These functions return JSON execution plans using `to_json(named_struct(...))`. 
 | Function | Parameters | Returns JSON plan for |
 |---|---|---|
 | `update_mapping_document` | `x_center`, `layer`, `update_payload` | UPDATE statement to deactivate old mapping |
-| `execute_sandbox_metadata_run` | `x_center`, `staging_catalog` | CREATE CATALOG/SCHEMA/TABLE DDL for sandbox |
+| `execute_sandbox_metadata_run` | `x_center`, `sandbox_catalog` | CREATE CATALOG/SCHEMA/TABLE DDL for sandbox |
 | `update_uc_catalog_comments` | `table_name`, `column_comments` | COMMENT ON COLUMN statements |
 | `write_technical_markdown_doc` | `file_path`, `content` | `dbutils.fs.put()` command for UC volume |
 | `trigger_pipeline_repair` | `run_id` | `w.jobs.repair_run()` SDK command |
@@ -502,8 +534,9 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 | Environment | Catalog | Git Branch | Purpose |
 |---|---|---|---|
 | Development | `pc_insurance_dev` | `feature/*` or `dev` | Development and testing |
-| Staging | `pc_insurance_staging` | `staging` | Pre-production validation |
-| Production | `pc_insurance` | `main` | Production workloads |
+| Main (Dev) | `pc_insurance` | `main` | Active development environment |
+
+> **Note**: Only the `dev` environment is currently active. Only the `dev` environment is currently active. See [DEPLOYMENT.md](DEPLOYMENT.md) for multi-environment guidance.
 
 ### Databricks Asset Bundles (DAB)
 
@@ -511,8 +544,9 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 
 ```bash
 databricks bundle deploy -t dev
-databricks bundle deploy -t prod
 ```
+
+> Only the `dev` target is currently defined. Only the `dev` target is currently defined.
 
 ### CI/CD Pipeline
 
@@ -590,7 +624,7 @@ The P&C Insurance Medallion Architecture provides:
 ✅ **Metadata-Driven**: No hardcoded logic, all configuration-based  
 ✅ **Data Quality**: Built-in validation, reconciliation, and audit logging  
 ✅ **Unity Catalog Governance**: Centralized security and data governance  
-✅ **Production-Ready**: CI/CD, monitoring, alerting, and rollback procedures
+✅ **Deployment-Ready**: CI/CD, monitoring, alerting, and rollback procedures
 
 ---
 

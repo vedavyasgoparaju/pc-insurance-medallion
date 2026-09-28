@@ -70,16 +70,16 @@
 # DBTITLE 1,Functions 4-7: SQL Functions
 # MAGIC %sql
 # MAGIC -- Function 4: execute_sandbox_metadata_run
-# MAGIC CREATE OR REPLACE FUNCTION execute_sandbox_metadata_run(x_center STRING, staging_catalog STRING)
+# MAGIC CREATE OR REPLACE FUNCTION execute_sandbox_metadata_run(x_center STRING, sandbox_catalog STRING)
 # MAGIC RETURNS STRING
 # MAGIC COMMENT 'UC Toolkit: Returns SQL plan for sandbox catalog creation and mapping clone.'
 # MAGIC RETURN to_json(named_struct(
-# MAGIC   'staging_catalog', staging_catalog,
+# MAGIC   'sandbox_catalog', sandbox_catalog,
 # MAGIC   'x_center', x_center,
 # MAGIC   'sql_statements', array(
-# MAGIC     concat('CREATE CATALOG IF NOT EXISTS ', staging_catalog),
-# MAGIC     concat('CREATE SCHEMA IF NOT EXISTS ', staging_catalog, '.metadata'),
-# MAGIC     concat('CREATE TABLE IF NOT EXISTS ', staging_catalog, '.metadata.mapping_documents AS SELECT * FROM pc_insurance_dev.metadata.mapping_documents WHERE x_center=', quote(x_center), ' AND is_active=true')
+# MAGIC     concat('CREATE CATALOG IF NOT EXISTS ', sandbox_catalog),
+# MAGIC     concat('CREATE SCHEMA IF NOT EXISTS ', sandbox_catalog, '.metadata'),
+# MAGIC     concat('CREATE TABLE IF NOT EXISTS ', sandbox_catalog, '.metadata.mapping_documents AS SELECT * FROM pc_insurance_dev.metadata.mapping_documents WHERE x_center=', quote(x_center), ' AND is_active=true')
 # MAGIC   ),
 # MAGIC   'status', 'sandbox_preparation_plan'
 # MAGIC ));

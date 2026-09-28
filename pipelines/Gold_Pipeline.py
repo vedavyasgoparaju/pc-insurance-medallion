@@ -314,7 +314,7 @@ gold_premium_growth = (
         F.col("new_business_premium") + F.col("renewal_premium") + 
         F.col("endorsement_premium") - F.col("cancelled_premium"))
     .withColumn("total_earned_premium", F.col("total_written_premium") * 0.85)  # approximation
-    .withColumn("growth_rate", F.lit(0.0))  # placeholder - calculate YoY in production
+    .withColumn("growth_rate", F.lit(0.0))  # placeholder - calculate YoY in full implementation
     .withColumn("loaded_at", now)
 )
 
@@ -389,7 +389,7 @@ gold_uw_summary = (
     .join(claim_stats, on=["reporting_period", "period_type", "line_of_business"], how="left")
     .fillna(0, subset=["total_claims", "total_incurred_losses", "avg_claim_severity"])
     .withColumn("new_policies", F.col("policy_count"))
-    .withColumn("renewed_policies", F.lit(0))  # from retention table in production
+    .withColumn("renewed_policies", F.lit(0))  # from retention table in full implementation
     .withColumn("cancelled_policies", F.lit(0))
     .withColumn("open_claims", F.col("claim_count"))
     .withColumn("closed_claims", F.lit(0))

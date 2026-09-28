@@ -1304,7 +1304,7 @@ Ensures compliance with the **Mandatory Change Completion Policy**:
 - Runtime: 13.3 LTS or higher
 - Workers: 2-4 nodes (autoscaling 2-8)
 
-**Production Cluster**:
+**Production Cluster** (future -- not yet deployed):
 - Runtime: 13.3 LTS or higher
 - Workers: 4-8 nodes (autoscaling 4-16)
 
@@ -1320,6 +1320,8 @@ Ensures compliance with the **Mandatory Change Completion Policy**:
 - [ ] Scheduled job configured and tested
 
 ### Deploying to Another Environment
+
+> **Note**: Only the `dev` environment is currently active. Staging and prod targets are defined in `databricks.yml` for future use. To deploy to another environment, add the corresponding target to `databricks.yml` first.
 
 The same Git commit can be deployed to `dev`, `staging`, or `prod`:
 

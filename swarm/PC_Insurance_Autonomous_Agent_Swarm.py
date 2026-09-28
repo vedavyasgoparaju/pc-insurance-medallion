@@ -40,7 +40,7 @@
 # MAGIC ### Key Design Principles
 # MAGIC
 # MAGIC - **Metadata-driven**: Agents never modify raw pipeline code — only mapping documents and metadata configs
-# MAGIC - **Sandbox isolation**: All changes tested in `dev_staging_<run_id>` before production
+# MAGIC - **Sandbox isolation**: All changes tested in `dev_sandbox_<run_id>` before deployment
 # MAGIC - **Loop protection**: Max 5 ReAct iterations or token-dollar cap before human escalation
 # MAGIC - **Auto-documentation**: Every change triggers UC comment updates + Markdown runbook generation
 # MAGIC
@@ -106,8 +106,8 @@ SERVERLESS_WAREHOUSE_ID = os.environ.get("PC_INSURANCE_WAREHOUSE_ID", "")
 # Unity Catalog metadata store locations
 METADATA_CATALOG    = "pc_insurance_dev"
 METADATA_SCHEMA     = "metadata"
-PROD_CATALOG        = "pc_insurance"
-STAGING_CATALOG_PREFIX = "dev_staging_"
+CATALOG        = "pc_insurance"
+SANDBOX_CATALOG_PREFIX = "dev_sandbox_"
 
 # Documentation volume path (UC Volume)
 DOCS_VOLUME_PATH = "/Volumes/pc_insurance_dev/metadata/technical_docs"
@@ -463,7 +463,7 @@ class SwarmState(TypedDict, total=False):
     # ── QA / Validation ──
     validation_results: Dict[str, Any]   # DLT expectation results
     validation_passed: bool              # True if sandbox QA passed
-    sandbox_catalog: str                 # Name of the staging catalog
+    sandbox_catalog: str                 # Name of the sandbox catalog
     sandbox_run_id: str                   # Databricks run ID in sandbox
 
     # ── Documentation ──
@@ -769,33 +769,33 @@ def _deep_merge_mapping(base: dict, overlay: dict) -> dict:
 # DBTITLE 1,UC Toolkit — Part 2
 # ═══════════════════════════════════════════════════════════════
 # Cell 5: UC Toolkit Functions — Part 2
-#   execute_sandbox_metadata_run(x_center, staging_catalog)
+#   execute_sandbox_metadata_run(x_center, sandbox_catalog)
 #   update_uc_catalog_comments(table_name, column_comments)
 #   write_technical_markdown_doc(file_path, content)
 #   trigger_pipeline_repair(run_id)
 # ═══════════════════════════════════════════════════════════════
 
-def execute_sandbox_metadata_run(x_center: str, staging_catalog: str) -> dict:
+def execute_sandbox_metadata_run(x_center: str, sandbox_catalog: str) -> dict:
     """
     Signals the metadata framework to compile and execute a test run
     using the newly updated mappings in a safe sandbox environment.
 
     This function:
-      1. Creates a staging catalog `dev_staging_<run_id>` if not exists
-      2. Copies the active mapping into the staging catalog
+      1. Creates a sandbox catalog `dev_sandbox_<run_id>` if not exists
+      2. Copies the active mapping into the sandbox catalog
       3. Triggers the ingestion pipeline in dry-run / validation mode
       4. Returns the sandbox run ID for QA verification
 
     Returns:
-        dict with keys: staging_catalog, sandbox_run_id, status
+        dict with keys: sandbox_catalog, sandbox_run_id, status
     """
-    # 1. Create staging catalog + schema
-    spark.sql(f"CREATE CATALOG IF NOT EXISTS {staging_catalog}")
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {staging_catalog}.metadata")
+    # 1. Create sandbox catalog + schema
+    spark.sql(f"CREATE CATALOG IF NOT EXISTS {sandbox_catalog}")
+    spark.sql(f"CREATE SCHEMA IF NOT EXISTS {sandbox_catalog}.metadata")
 
-    # 2. Clone the updated mapping into staging
+    # 2. Clone the updated mapping into sandbox
     spark.sql(f"""
-        CREATE TABLE IF NOT EXISTS {staging_catalog}.metadata.mapping_documents
+        CREATE TABLE IF NOT EXISTS {sandbox_catalog}.metadata.mapping_documents
         AS SELECT * FROM {METADATA_CATALOG}.{METADATA_SCHEMA}.mapping_documents
         WHERE x_center = '{x_center}' AND is_active = true
     """)
@@ -811,33 +811,33 @@ def execute_sandbox_metadata_run(x_center: str, staging_catalog: str) -> dict:
 
     if not target_job_id:
         return {
-            "staging_catalog": staging_catalog,
+            "sandbox_catalog": sandbox_catalog,
             "sandbox_run_id": "",
             "status": "error",
             "message": f"Job '{job_name}' not found"
         }
 
-    # 4. Trigger the job with a staging catalog parameter override
+    # 4. Trigger the job with a sandbox catalog parameter override
     try:
         run_response = _w.jobs.run_now(
             job_id=target_job_id,
             notebook_params={
-                "target_catalog": staging_catalog,
+                "target_catalog": sandbox_catalog,
                 "x_center": x_center,
                 "execution_mode": "sandbox_validation"
             }
         )
         sandbox_run_id = str(run_response.run_id)
-        logger.info(f"Sandbox run triggered: {sandbox_run_id} in {staging_catalog}")
+        logger.info(f"Sandbox run triggered: {sandbox_run_id} in {sandbox_catalog}")
         return {
-            "staging_catalog": staging_catalog,
+            "sandbox_catalog": sandbox_catalog,
             "sandbox_run_id": sandbox_run_id,
             "status": "triggered",
             "job_id": target_job_id
         }
     except Exception as e:
         return {
-            "staging_catalog": staging_catalog,
+            "sandbox_catalog": sandbox_catalog,
             "sandbox_run_id": "",
             "status": "error",
             "message": str(e)
@@ -1168,7 +1168,7 @@ Return your routing decision as JSON with keys: next_agent, reasoning, failure_d
         elif phase == SwarmPhase.DEPLOY.value:
             state["next_agent"] = AgentRole.DEPLOYMENT.value
             state = self._log_action(state, "route_to_deployment",
-                "Routing to Deployment Agent for production repair + Git sync")
+                "Routing to Deployment Agent for pipeline repair + Git sync")
 
         elif phase == SwarmPhase.COMPLETE.value:
             state["next_agent"] = "__end__"
@@ -1280,7 +1280,7 @@ Return JSON with keys: error_class, affected_table, downstream_impact (list), po
             # Infer the affected table from x_center + layer
             x_center = state.get("affected_x_center", "").lower()
             layer = state.get("affected_layer", "bronze")
-            affected_table = f"{PROD_CATALOG}.{layer}.{x_center}_raw"
+            affected_table = f"{CATALOG}.{layer}.{x_center}_raw"
             state["affected_table"] = affected_table
 
         downstream_impact = self._fetch_downstream_impact(affected_table)
@@ -1683,8 +1683,8 @@ Return JSON with keys: validation_passed, ddl_statements, uc_comment_update, tec
             state = self._log_action(state, "ddl_generated",
                 f"{len(ddl_statements)} DDL statements generated")
 
-        # ── Step 4: Generate sandbox staging catalog + trigger test run ──
-        sandbox_catalog = f"{STAGING_CATALOG_PREFIX}{state.get('run_id', str(uuid.uuid4())[:8])}"
+        # ── Step 4: Generate sandbox sandbox catalog + trigger test run ──
+        sandbox_catalog = f"{SANDBOX_CATALOG_PREFIX}{state.get('run_id', str(uuid.uuid4())[:8])}"
         state["sandbox_catalog"] = sandbox_catalog
 
         sandbox_result = execute_sandbox_metadata_run(x_center, sandbox_catalog)
@@ -1818,7 +1818,7 @@ class QAValidationAgent(BaseAgent):
       - Query the sandbox run output for validation results
       - Run DLT expectation checks (expect, expect_or_drop, expect_or_fail)
       - Run Great Expectations suites if configured
-      - Verify schema adherence in the staging catalog
+      - Verify schema adherence in the sandbox catalog
       - Report pass/fail back to the Supervisor
     """
 
@@ -2029,7 +2029,7 @@ Return JSON:
 
 class DeploymentAgent(BaseAgent):
     """
-    The Deployment Agent manages isolated staging environments,
+    The Deployment Agent manages isolated sandbox environments,
     triggers execution runs, and handles automated Git branch commits/PR
     creations for updated metadata assets and technical markdown files.
 
@@ -2038,7 +2038,7 @@ class DeploymentAgent(BaseAgent):
       - Write technical schema docs to UC Volume / Git
       - Trigger pipeline repair via the Jobs API
       - Create Git branch and PR for metadata + docs changes
-      - Clean up staging catalogs after successful deployment
+      - Clean up sandbox catalogs after successful deployment
       - Set final_status to 'resolved'
     """
 
@@ -2047,10 +2047,10 @@ Your job is to:
 1. Write technical documentation (post-mortems, schema docs) to UC Volumes and Git.
 2. Trigger the pipeline repair to resume the failed run with updated metadata.
 3. Create a Git branch and PR for the metadata + documentation changes.
-4. Clean up the staging catalog after successful deployment.
+4. Clean up the sandbox catalog after successful deployment.
 5. Report the final deployment status.
 
-Return JSON with keys: repair_triggered, docs_written, git_pr_url, staging_cleaned, deployment_status.
+Return JSON with keys: repair_triggered, docs_written, git_pr_url, sandbox_cleaned, deployment_status.
 """
 
     def __init__(self, llm_client: LLMServingClient):
@@ -2097,10 +2097,10 @@ Return JSON with keys: repair_triggered, docs_written, git_pr_url, staging_clean
         state = self._log_action(state, "git_pr",
             f"PR URL: {git_pr_url or 'N/A (Git not configured)'}")
 
-        # ── Step 5: Clean up staging catalog ──
+        # ── Step 5: Clean up sandbox catalog ──
         if sandbox_catalog:
-            cleanup_result = self._cleanup_staging(sandbox_catalog)
-            state = self._log_action(state, "staging_cleanup",
+            cleanup_result = self._cleanup_sandbox(sandbox_catalog)
+            state = self._log_action(state, "sandbox_cleanup",
                 f"{sandbox_catalog}: {cleanup_result}")
 
         # ── Step 6: Set final status ──
@@ -2164,20 +2164,20 @@ Return JSON with keys: repair_triggered, docs_written, git_pr_url, staging_clean
 
         branch_name = f"{GIT_BRANCH_PREFIX}/{state.get('run_id', 'unknown')}_{state.get('session_id', '')[:8]}"
 
-        # In production, this would use the Databricks Repos API or Git CLI:
+        # In full implementation, this would use the Databricks Repos API or Git CLI:
         # 1. Create a new branch
         # 2. Commit the updated mapping_documents table export
         # 3. Commit the technical docs markdown files
         # 4. Create a PR via the Git provider API
 
-        # Placeholder for Git integration (implemented via runGit tool or Git CLI in production)
+        # Placeholder for Git integration (implemented via runGit tool or Git CLI in full implementation)
         self.logger.info(f"Git PR creation requested for branch: {branch_name}")
 
-        # Return a mock PR URL (replace with actual Git provider API in production)
+        # Return a mock PR URL (replace with actual Git provider API in full implementation)
         return f"https://github.com/your-org/pc-insurance-metadata/pull/new/{branch_name}"
 
-    def _cleanup_staging(self, catalog: str) -> str:
-        """Drop the staging catalog after successful deployment."""
+    def _cleanup_sandbox(self, catalog: str) -> str:
+        """Drop the sandbox catalog after successful deployment."""
         try:
             spark.sql(f"DROP CATALOG IF EXISTS {catalog} CASCADE")
             return "cleaned_up"
@@ -2374,7 +2374,7 @@ def simulate_scenario_a() -> dict:
     AnalysisException: [UNRESOLVED_COLUMN.IN] An unresolved column
     'new_acord_coverage_field_cd' was found in the PolicyCenter Bronze
     ingestion. The column does not exist in the current mapping document
-    for pc_insurance_prod.bronze.policycenter_raw.
+    for pc_insurance.bronze.policycenter_raw.
     Schema mismatch: expected 45 columns, found 46 columns.
     ACORD standard field: 'new_acord_coverage_field_cd' (string, nullable).
     """
@@ -2384,7 +2384,7 @@ def simulate_scenario_a() -> dict:
     state["error_log"] = mock_error
     state["affected_x_center"] = "PolicyCenter"
     state["affected_layer"] = "bronze"
-    state["affected_table"] = f"{PROD_CATALOG}.bronze.policycenter_raw"
+    state["affected_table"] = f"{CATALOG}.bronze.policycenter_raw"
     state["phase"] = SwarmPhase.PLAN.value
 
     print(f"\nInitial State:")
@@ -2407,7 +2407,7 @@ def simulate_scenario_a() -> dict:
         "transformation_rules": [{
             "rule_name": "auto_schema_evolution_acord",
             "rule_type": "schema_evolution",
-            "rule_sql": "ALTER TABLE pc_insurance_prod.bronze.policycenter_raw ADD COLUMN IF NOT EXISTS new_acord_coverage_field_cd STRING",
+            "rule_sql": "ALTER TABLE pc_insurance.bronze.policycenter_raw ADD COLUMN IF NOT EXISTS new_acord_coverage_field_cd STRING",
             "applies_to": "new_acord_coverage_field_cd",
             "condition": None
         }],
@@ -2421,10 +2421,10 @@ def simulate_scenario_a() -> dict:
     print(f"\nExpected BA Delta:")
     print(json.dumps(expected_ba_delta, indent=2)[:800])
 
-    print("\n[In production, the full swarm graph would execute here]")
+    print("\n[In full implementation, the full swarm graph would execute here]")
     print("  Supervisor → Triage → BA → Data Engineer → QA → Deployment")
 
-    # Execute the swarm graph (uncomment in production)
+    # Execute the swarm graph (uncomment in full implementation)
     # result = execute_swarm(state)
     # print(f"\nFinal Status: {result.get('final_status')}")
     # print(f"Attempts: {result.get('attempt_counter')}, Cost: ${result.get('token_cost_usd', 0):.2f}")
@@ -2462,7 +2462,7 @@ def simulate_scenario_b() -> dict:
     mock_run_id = "894776717783669"
     mock_error = """
     DeltaAnalysisException: [NOT_NULL_VIOLATION] The NOT NULL constraint
-    on column 'deductible_amount' in table pc_insurance_prod.silver.mga_policy_silver
+    on column 'deductible_amount' in table pc_insurance.silver.mga_policy_silver
     was violated. 1,247 rows from MGA_Feed source system (group_code='COMMERCIAL')
     contain NULL values for deductible_amount.
     DLT expectation 'expect_deductible_not_null' FAILED.
@@ -2472,7 +2472,7 @@ def simulate_scenario_b() -> dict:
     state["error_log"] = mock_error
     state["affected_x_center"] = "MGA_Feed"
     state["affected_layer"] = "silver"
-    state["affected_table"] = f"{PROD_CATALOG}.silver.mga_policy_silver"
+    state["affected_table"] = f"{CATALOG}.silver.mga_policy_silver"
     state["phase"] = SwarmPhase.PLAN.value
 
     print(f"\nInitial State:")
@@ -2501,7 +2501,7 @@ def simulate_scenario_b() -> dict:
     print(f"\nExpected BA Delta (conditional fallback rule):")
     print(json.dumps(expected_ba_delta, indent=2)[:800])
 
-    print("\n[In production, the full swarm graph would execute here]")
+    print("\n[In full implementation, the full swarm graph would execute here]")
     print("  Supervisor → Triage → BA (adds COALESCE rule) → Data Engineer → QA → Deployment")
 
     return {"scenario": "B", "state": state, "expected_delta": expected_ba_delta}
@@ -2537,7 +2537,7 @@ def simulate_scenario_c() -> dict:
     mock_error = """
     DLTValidationException: Gold layer validation failed.
     Expectation 'loss_ratio_threshold_check' FAILED.
-    Table: pc_insurance_prod.gold.claims_kpi_gold
+    Table: pc_insurance.gold.claims_kpi_gold
     Metric: loss_ratio = 547.3% (threshold max: 200%)
     Region: FLORIDA | Date Range: 2026-09-20 to 2026-09-25
     Context: Hurricane Helene — CAT 4 landfall. 18,432 claims filed in 5 days.
@@ -2548,7 +2548,7 @@ def simulate_scenario_c() -> dict:
     state["error_log"] = mock_error
     state["affected_x_center"] = "ClaimCenter"
     state["affected_layer"] = "gold"
-    state["affected_table"] = f"{PROD_CATALOG}.gold.claims_kpi_gold"
+    state["affected_table"] = f"{CATALOG}.gold.claims_kpi_gold"
     state["phase"] = SwarmPhase.PLAN.value
 
     print(f"\nInitial State:")
@@ -2577,7 +2577,7 @@ def simulate_scenario_c() -> dict:
     print(f"\nExpected BA Delta (threshold override):")
     print(json.dumps(expected_ba_delta, indent=2)[:1000])
 
-    print("\n[In production, the full swarm graph would execute here]")
+    print("\n[In full implementation, the full swarm graph would execute here]")
     print("  Supervisor → Triage → BA (updates threshold) → QA → Deployment")
     print("  Triage also auto-generates incident report classifying as accepted variance")
 
@@ -2592,7 +2592,7 @@ def simulate_scenario_c() -> dict:
 #
 # This cell implements the three guardrail pillars:
 #   1. Network Access & Security: UC Network Rules for HTTPS egress
-#   2. Sandbox Isolation: Agents cannot touch production directly
+#   2. Sandbox Isolation: Agents cannot touch the main catalog directly
 #   3. Infinite-Loop Token Protection: Max 5 ReAct loops + dollar cap
 # ─────────────────────────────────────────────────────────────────
 
@@ -2637,7 +2637,7 @@ class SecurityGuardrails:
         Creates Unity Catalog Network Rules restricting HTTPS egress to only
         the local Databricks workspace domain and target enterprise Git repos.
 
-        In production, run this via the Databricks CLI or REST API:
+        In full implementation, run this via the Databricks CLI or REST API:
             databricks uc create-network-rule ...
         """
         # Example: Create UC network rules (run once during setup)
@@ -2657,24 +2657,24 @@ class SecurityGuardrails:
     @staticmethod
     def validate_sandbox_isolation(state: SwarmState, operation: str) -> tuple:
         """
-        Ensures agents are operating within the staging catalog, not production.
+        Ensures agents are operating within the sandbox catalog, not the main catalog.
         Returns (is_safe, reason).
         """
         phase = state.get("phase", "")
         sandbox_catalog = state.get("sandbox_catalog", "")
 
-        # Before DEPLOY phase, all operations must target the staging catalog
+        # Before DEPLOY phase, all operations must target the sandbox catalog
         if phase in [SwarmPhase.EXECUTE.value, SwarmPhase.VERIFY.value]:
             if not sandbox_catalog and operation != "read_mapping":
-                return False, "No staging catalog provisioned for write operations"
+                return False, "No sandbox catalog provisioned for write operations"
 
-            # Verify we're not writing to the production catalog
-            if PROD_CATALOG in str(state.get("affected_table", "")) and phase == SwarmPhase.VERIFY.value:
-                return False, f"Attempted production write during VERIFY phase. Use staging catalog instead."
+            # Verify we're not writing to the main catalog
+            if CATALOG in str(state.get("affected_table", "")) and phase == SwarmPhase.VERIFY.value:
+                return False, f"Attempted main catalog write during VERIFY phase. Use sandbox catalog instead."
 
-        # DEPLOY phase is the only phase where production repair is allowed
+        # DEPLOY phase is the only phase where pipeline repair is allowed
         if phase == SwarmPhase.DEPLOY.value and not state.get("validation_passed", False):
-            return False, "Cannot deploy to production without passing QA validation"
+            return False, "Cannot deploy to the main catalog without passing QA validation"
 
         return True, "OK"
 
@@ -2719,7 +2719,7 @@ class SecurityGuardrails:
 
 **Next Steps for Human Engineers:**
 1. Review the error log and actions taken by the swarm
-2. Check the staging catalog for partial results: {state.get('sandbox_catalog', 'N/A')}
+2. Check the sandbox catalog for partial results: {state.get('sandbox_catalog', 'N/A')}
 3. Read the post-mortem in: {DOCS_VOLUME_PATH}/escalations/
 4. Apply manual fix if the swarm could not resolve autonomously
 5. Update the mapping document manually if needed
@@ -2735,8 +2735,8 @@ print("Security Guardrails Initialized:")
 print(f"  Max ReAct Iterations: {MAX_REACT_ITERATIONS}")
 print(f"  Max Token Budget: ${MAX_TOKEN_BUDGET_USD}")
 print(f"  Allowed Egress: {SecurityGuardrails.ALLOWED_EGRESS_DOMAINS}")
-print(f"  Staging Catalog Prefix: {STAGING_CATALOG_PREFIX}")
-print(f"  Production Catalog: {PROD_CATALOG}")
+print(f"  Sandbox Catalog Prefix: {SANDBOX_CATALOG_PREFIX}")
+print(f"  Main Catalog: {CATALOG}")
 print(f"  Docs Volume: {DOCS_VOLUME_PATH}")
 
 # COMMAND ----------
@@ -3206,8 +3206,8 @@ print("Endpoints can also be created via: UI > Serving Endpoints > Create Endpoi
 # COMMAND ----------
 
 # DBTITLE 1,Environment Validation & Readiness Check
-# Cell 21: Environment Validation & Production Readiness Check
-# Validates all components before production use.
+# Cell 21: Environment Validation & Readiness Check
+# Validates all components before deployment use.
 
 from databricks.sdk import WorkspaceClient
 _w = WorkspaceClient()
@@ -3248,10 +3248,10 @@ try:
 except Exception as e:
     chk("Schema metadata", False, str(e)[:80])
 try:
-    spark.sql("USE CATALOG " + PROD_CATALOG)
-    chk("Production catalog " + PROD_CATALOG, True)
+    spark.sql("USE CATALOG " + CATALOG)
+    chk("Main catalog " + CATALOG, True)
 except Exception as e:
-    chk("Production catalog " + PROD_CATALOG, False, str(e)[:80])
+    chk("Main catalog " + CATALOG, False, str(e)[:80])
 
 # 2. Metadata Tables
 print("\n-- 2. Metadata Tables --")
@@ -3335,34 +3335,34 @@ chk("build_swarm_graph", "build_swarm_graph" in dir())
 chk("execute_swarm", "execute_swarm" in dir())
 chk("init_swarm_state", "init_swarm_state" in dir())
 
-# 12. Production Tables
-print("\n-- 12. Production Catalog Tables --")
+# 12. Main Catalog Tables
+print("\n-- 12. Main Catalog Tables --")
 try:
-    pt = spark.sql("SELECT table_schema, table_name FROM " + PROD_CATALOG + ".information_schema.tables WHERE table_schema IN ('bronze','silver','gold') ORDER BY table_schema, table_name").collect()
+    pt = spark.sql("SELECT table_schema, table_name FROM " + CATALOG + ".information_schema.tables WHERE table_schema IN ('bronze','silver','gold') ORDER BY table_schema, table_name").collect()
     if pt:
-        chk("Production tables in " + PROD_CATALOG + " (" + str(len(pt)) + " tables)", True)
+        chk("Main catalog tables in " + CATALOG + " (" + str(len(pt)) + " tables)", True)
         for t in pt:
             print("    " + str(t["table_schema"]) + "." + str(t["table_name"]))
     else:
-        wrn("No bronze/silver/gold tables in " + PROD_CATALOG, "Run data pipeline first")
+        wrn("No bronze/silver/gold tables in " + CATALOG, "Run data pipeline first")
 except Exception as e:
-    wrn("Cannot query " + PROD_CATALOG, str(e)[:80])
+    wrn("Cannot query " + CATALOG, str(e)[:80])
 
 print("\n" + "=" * 70)
 print("VALIDATION SUMMARY: " + str(pass_count) + " passed, " + str(fail_count) + " failed, " + str(warn_count) + " warnings")
 if fail_count == 0:
     print("\n  >>> Environment is READY for autonomous swarm operations. <<<")
 else:
-    print("\n  >>> " + str(fail_count) + " check(s) FAILED. Review before production use. <<<")
+    print("\n  >>> " + str(fail_count) + " check(s) FAILED. Review before deployment use. <<<")
 if warn_count > 0:
     print("  >>> " + str(warn_count) + " warning(s) -- non-blocking. <<<")
 print("=" * 70)
 
 # COMMAND ----------
 
-# DBTITLE 1,Production Entry Point — Job Parameter Handler
+# DBTITLE 1,Entry Point — Job Parameter Handler
 # ═══════════════════════════════════════════════════════════════
-# Cell 24: Production Entry Point — Job Parameter Handler
+# Cell 24: Entry Point — Job Parameter Handler
 # ═══════════════════════════════════════════════════════════════
 # When run as a Lakeflow Job task, this cell reads the failed run_id
 # from job parameters (passed as widgets) and triggers the autonomous
@@ -3388,7 +3388,7 @@ if not error_context:
 
 if run_id and run_id.strip():
     print("=" * 70)
-    print("AUTONOMOUS SWARM — PRODUCTION TRIGGER")
+    print("AUTONOMOUS SWARM — TRIGGER")
     print("=" * 70)
     print("  Run ID: " + run_id)
     print("  Trigger: " + trigger_source)

@@ -337,7 +337,7 @@ print(result)
 2. Add to DQ check notebook
 3. Update threshold in configuration
 4. Test on sample data
-5. Deploy to production
+5. Deploy changes
 
 ---
 
@@ -347,7 +347,7 @@ print(result)
 
 | Level | Description | Response Time | Escalation |
 |-------|-------------|---------------|------------|
-| P1 - Critical | Production pipeline down | 15 minutes | Immediate |
+| P1 - Critical | Data pipeline down | 15 minutes | Immediate |
 | P2 - High | Data quality < 90% | 1 hour | If not resolved in 2 hours |
 | P3 - Medium | Performance degradation | 4 hours | If not resolved in 8 hours |
 | P4 - Low | Minor issues, warnings | Next business day | N/A |

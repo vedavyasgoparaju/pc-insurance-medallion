@@ -180,7 +180,7 @@ Provide:
 1. **Setup**: databricks.yml structure
 2. **Configuration**: Resource definitions
 3. **Commands**: Deployment commands
-4. **Environments**: Dev/staging/prod setup
+4. **Environments**: Dev environment setup
 5. **Best Practices**: Deployment guidelines
 
 ## Important Guidelines
@@ -412,7 +412,6 @@ Refer to DOC-041 for detailed pipeline configuration.
 2. **Deploy to target environment**:
    ```bash
    databricks bundle deploy -t dev
-   databricks bundle deploy -t prod
    ```
 
 3. **Run deployed resources**:
