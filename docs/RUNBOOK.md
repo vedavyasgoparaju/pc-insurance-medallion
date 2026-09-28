@@ -56,6 +56,8 @@ This runbook provides operational procedures for running, monitoring, and troubl
    SELECT 
      table_name,
      AVG(CASE WHEN validation_result = 'PASS' THEN 1.0 ELSE 0.0 END) AS dq_score
+   -- NOTE: dq_validation_results table is planned but not yet created.
+   -- DQ functions return results inline. This query will return empty until the table is created.
    FROM pc_insurance.dq.dq_validation_results
    WHERE DATE(validation_timestamp) = CURRENT_DATE() - 1
    GROUP BY table_name;

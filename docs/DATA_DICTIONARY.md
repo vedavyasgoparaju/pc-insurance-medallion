@@ -312,6 +312,27 @@ This document provides detailed definitions for all tables, columns, and metrics
 
 ---
 
+### pc_insurance.silver.date_dim
+
+**Description**: Generated date dimension covering fiscal years 2020-2026
+
+| Column | Data Type | Description | Transformation |
+|--------|-----------|-------------|----------------|
+| date_id | BIGINT | Surrogate key (YYYYMMDD as integer) | Generated |
+| full_date | DATE | Calendar date | Generated (2020-01-01 to 2026-12-31) |
+| day | INT | Day of month (1-31) | Extracted from full_date |
+| day_of_week | INT | Day of week (1=Sunday to 7=Saturday) | Extracted from full_date |
+| is_weekend | LONG | Weekend flag (1=Sat/Sun, 0=weekday) | Derived from day_of_week |
+| week_of_year | INT | ISO week number (1-53) | Extracted from full_date |
+| month | INT | Month number (1-12) | Extracted from full_date |
+| quarter | INT | Quarter number (1-4) | Derived from month |
+| year | INT | Calendar year | Extracted from full_date |
+
+**Partitioning**: None (small dimension table)
+**Row Count**: ~2,557 (2020-01-01 to 2026-12-31)
+
+---
+
 ## Gold Layer Tables
 
 ### pc_insurance.gold.loss_ratio_by_lob
@@ -434,7 +455,70 @@ This document provides detailed definitions for all tables, columns, and metrics
 
 ---
 
-## Metadata Tables
+## Reference Tables
+
+### pc_insurance.reference.bronze_ingestion_config
+
+**Description**: Configuration for metadata-driven Bronze ingestion (Auto Loader sources)
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| source_name | STRING | Logical source name (policies, claims, etc.) |
+| source_directory | STRING | UC Volume path to source files directory |
+| target_table | STRING | Fully qualified Bronze target table |
+| staging_table | STRING | Fully qualified staging table |
+| source_system | STRING | Source system identifier for lineage |
+| file_format | STRING | File format: csv, json, parquet |
+| primary_key | STRING | Primary key column for dedup |
+| schema_json | STRING | Spark schema as JSON string |
+| is_active | BOOLEAN | Whether this source is actively loaded |
+| load_order | INT | Processing order (1=first) |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Record update time |
+
+---
+
+### pc_insurance.reference.bronze_load_audit
+
+**Description**: Audit trail for Bronze layer ingestion runs
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| load_id | STRING | Unique load execution ID (UUID) |
+| source_name | STRING | Source name from config |
+| load_type | STRING | INITIAL or INCREMENTAL |
+| load_start_time | TIMESTAMP | When load started |
+| load_end_time | TIMESTAMP | When load completed |
+| source_file_count | INT | Number of files processed |
+| source_row_count | LONG | Rows read from source |
+| staging_row_count | LONG | Rows in staging after load |
+| target_row_count_before | LONG | Target table count before merge |
+| target_row_count_after | LONG | Target table count after merge |
+| rows_inserted | LONG | Net new rows added to target |
+| status | STRING | SUCCESS, FAILED, PARTIAL |
+| error_message | STRING | Error details if failed |
+
+---
+
+### pc_insurance.reference.bronze_reconciliation
+
+**Description**: Reconciliation records for Bronze layer source-to-target counts
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| reconciliation_id | STRING | Unique reconciliation ID (UUID) |
+| load_id | STRING | FK to bronze_load_audit |
+| source_name | STRING | Source name |
+| source_file_name | STRING | Source file that was loaded |
+| source_row_count | LONG | Rows in source file |
+| staging_row_count | LONG | Rows in staging table |
+| target_row_count | LONG | Rows in target table |
+| expected_target_count | LONG | Expected target count (before + source) |
+| match_status | STRING | MATCH, MISMATCH, ERROR |
+| mismatch_details | STRING | Description of mismatch if any |
+| reconciled_at | TIMESTAMP | Reconciliation timestamp |
+
+---
 
 ### pc_insurance.reference.silver_transformation_config
 
@@ -444,11 +528,170 @@ See `sql/03_silver_transformation_config.sql` for schema.
 
 ---
 
+### pc_insurance.reference.silver_load_audit
+
+**Description**: Audit trail for Silver layer transformation runs
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| load_id | STRING | Unique load execution ID (UUID) |
+| transformation_name | STRING | Transformation name from config |
+| load_type | STRING | INITIAL or INCREMENTAL |
+| load_start_time | TIMESTAMP | When load started |
+| load_end_time | TIMESTAMP | When load completed |
+| source_row_count | LONG | Rows read from Bronze source |
+| staging_row_count | LONG | Rows in staging after transformation |
+| target_row_count_before | LONG | Target table count before merge |
+| target_row_count_after | LONG | Target table count after merge |
+| rows_inserted | LONG | Net new rows added to target |
+| rows_updated | LONG | Rows updated in target (SCD2 expirations) |
+| scd2_new_versions | LONG | New SCD2 versions created |
+| scd2_closed_versions | LONG | SCD2 versions closed (set is_current=false) |
+| status | STRING | SUCCESS, FAILED, PARTIAL |
+| error_message | STRING | Error details if failed |
+
+---
+
+### pc_insurance.reference.silver_reconciliation
+
+**Description**: Reconciliation records for Silver layer source-to-target counts
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| reconciliation_id | STRING | Unique reconciliation ID (UUID) |
+| load_id | STRING | FK to silver_load_audit |
+| transformation_name | STRING | Transformation name |
+| source_row_count | LONG | Rows in Bronze source |
+| staging_row_count | LONG | Rows in Silver staging |
+| target_row_count | LONG | Rows in Silver target (is_current=true only for SCD2) |
+| expected_target_count | LONG | Expected target count based on business rules |
+| match_status | STRING | MATCH, MISMATCH, WARNING, ERROR |
+| mismatch_details | STRING | Description of mismatch if any |
+| reconciled_at | TIMESTAMP | Reconciliation timestamp |
+
+---
+
 ### pc_insurance.reference.gold_metric_config
 
 **Description**: Configuration for metadata-driven Gold KPI generation
 
 See `sql/05_gold_metric_config.sql` for schema.
+
+---
+
+### pc_insurance.reference.gold_load_audit
+
+**Description**: Audit trail for Gold layer metric refresh runs
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| load_id | STRING | Unique load execution ID |
+| metric_name | STRING | Metric name from config |
+| output_table | STRING | Fully qualified Gold output table |
+| load_start_time | TIMESTAMP | When refresh started |
+| load_end_time | TIMESTAMP | When refresh completed |
+| source_row_count | LONG | Rows read from Silver source |
+| target_row_count | LONG | Rows written to Gold target |
+| status | STRING | SUCCESS, FAILED, PARTIAL |
+| error_message | STRING | Error details if failed |
+
+---
+
+### pc_insurance.reference.agent_requests
+
+**Description**: Tracks autonomous agent swarm requests and their execution status
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| request_id | STRING | Unique request identifier (UUID) |
+| request_text | STRING | Original natural-language request from user |
+| status | STRING | Request status (PENDING, PLANNING, EXECUTING, COMPLETED, FAILED) |
+| plan_json | STRING | JSON execution plan generated by swarm |
+| execution_run_id | LONG | Job run ID if a pipeline was triggered |
+| error_message | STRING | Error details if failed |
+| submitted_at | TIMESTAMP | When request was submitted |
+| updated_at | TIMESTAMP | When request was last updated |
+
+---
+
+### pc_insurance.reference.project_documentation
+
+**Description**: Structured documentation table for all architecture components (used by Genie spaces)
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| doc_id | STRING | Unique documentation identifier (DOC-001 to DOC-037) |
+| layer | STRING | Architecture layer: Bronze, Silver, Gold, DQ, Agent, Pipeline, or ALL |
+| component | STRING | Specific component name (table name, agent name, pipeline step) |
+| doc_type | STRING | Documentation type: Table Schema, Dimension, Fact Table, KPI Aggregation, DQ Function, Agent Architecture, Pipeline Step, Overview |
+| title | STRING | Human-readable title for this documentation entry |
+| description | STRING | Detailed description of the component, its purpose, and contents |
+| schema_definition | STRING | Column schema or resource identifier |
+| business_context | STRING | Business context explaining why this component exists and what it means in P&C insurance |
+| kpi_formula | STRING | Mathematical formula for KPIs (e.g., Loss Ratio = Incurred Losses / Earned Premium) |
+| code_example | STRING | Example SQL query to query this component |
+| dependencies | STRING | Upstream dependencies (source tables, notebooks, etc.) |
+| created_at | TIMESTAMP | Timestamp when this documentation entry was created |
+
+---
+
+## Dev Catalog Tables
+
+### pc_insurance_dev.metadata.mapping_documents
+
+**Description**: Mapping documents for the autonomous swarm toolkit (X-Center to layer mappings)
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| x_center | STRING | X-Center identifier (e.g., PC_INSURANCE) |
+| layer | STRING | Architecture layer (e.g., BRONZE, SILVER, GOLD) |
+| version | INT | Mapping version number |
+| is_active | BOOLEAN | Whether this mapping version is active |
+| mapping_json | STRING | JSON mapping definition for the layer |
+| business_description | STRING | Human-readable description of the mapping |
+| updated_by | STRING | User who last updated this mapping |
+| updated_at | TIMESTAMP | Last update timestamp |
+
+---
+
+### pc_insurance_dev.metadata.threshold_controls
+
+**Description**: Threshold control configuration for swarm-triggered pipeline repairs
+
+| Column | Data Type | Description |
+|--------|-----------|-------------|
+| metric_name | STRING | Metric name (e.g., loss_ratio, claim_frequency) |
+| region | STRING | Geographic region or ALL |
+| event_type | STRING | Event type (e.g., SPIKE, DROP, ANOMALY) |
+| max_threshold | DOUBLE | Maximum acceptable threshold value |
+| min_threshold | DOUBLE | Minimum acceptable threshold value |
+| effective_start_date | DATE | When this threshold becomes effective |
+| effective_end_date | DATE | When this threshold expires (NULL = no expiry) |
+| is_active | BOOLEAN | Whether this threshold control is active |
+| updated_by | STRING | User who last updated this threshold |
+| updated_at | TIMESTAMP | Last update timestamp |
+
+---
+
+## UC Volumes
+
+### pc_insurance.reference.pc_domain_docs
+
+**Description**: UC Volume containing P&C insurance domain reference documents for the Domain Expert Agent (Knowledge Assistant)
+
+**Location**: `/Volumes/pc_insurance/reference/pc_domain_docs`
+
+**Contents**: PDF and text documents covering P&C insurance concepts, NAIC requirements, loss ratio definitions, and underwriting guidelines.
+
+---
+
+### pc_insurance_dev.metadata.technical_docs
+
+**Description**: UC Volume for technical documentation generated by the autonomous swarm
+
+**Location**: `/Volumes/pc_insurance_dev/metadata/technical_docs`
+
+**Subdirectories**: `post_mortems`, `schema_docs`, `escalations`
 
 ---
 
@@ -482,5 +725,5 @@ See `sql/05_gold_metric_config.sql` for schema.
 ---
 
 **Version**: 1.0  
-**Last Updated**: 2026-09-24  
+**Last Updated**: 2026-09-28  
 **Owner**: Data Engineering Team

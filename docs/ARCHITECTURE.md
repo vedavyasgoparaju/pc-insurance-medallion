@@ -110,7 +110,7 @@ The P&C Insurance Medallion Architecture is a comprehensive data platform built 
 - **Metadata-Driven**: Metrics driven by `gold_metric_config`
 - **Pre-Aggregated**: Optimized for BI tools
 - **Business Logic**: Loss ratios, frequencies, retention rates
-- **Audit Logging**: Every refresh logged in `gold_refresh_audit`
+- **Audit Logging**: Every refresh logged in `gold_load_audit`
 - **Data Quality Scores**: DQ metrics tracked per refresh
 
 **Implementation**: `pipelines/Gold_Pipeline.py`
@@ -319,7 +319,7 @@ INSERT INTO gold_metric_config VALUES (
 );
 ```
 
-**Audit Table**: `pc_insurance.reference.gold_refresh_audit` — tracks metric ID, refresh timestamp, status, row counts, metric values, DQ scores, execution time.
+**Audit Table**: `pc_insurance.reference.gold_load_audit` — tracks metric ID, refresh timestamp, status, row counts, metric values, DQ scores, execution time.
 
 ---
 
@@ -481,7 +481,9 @@ Functions are registered by `swarm/PC_Insurance_Toolkit_Functions_Registration.p
 
 ### Schema: `pc_insurance.dq`
 
-**Table**: `dq_validation_results` — tracks validation rule, table/column, pass/fail status, failed record count, validation timestamp.
+**Table**: `dq_validation_results` (planned — not yet created) — will track validation rule, table/column, pass/fail status, failed record count, validation timestamp.
+
+> **Note**: The `dq_validation_results` table is referenced in monitoring queries (RUNBOOK.md, DEPLOYMENT.md) but does not yet exist in `pc_insurance.dq`. The 7 DQ functions (`check_policy_exists`, `check_claim_status`, `check_premium_positive`, `check_loss_ratio`, `check_not_null`, `check_date_order`, `calculate_dq_score`) currently return results inline. This table will be created when DQ result persistence is implemented. Monitoring queries referencing this table will return empty results until then.
 
 ### DQ Checks
 

@@ -1378,6 +1378,8 @@ ORDER BY run_timestamp DESC LIMIT 10;
 **Diagnosis**:
 ```sql
 SELECT table_name, column_name, validation_rule, failed_record_count
+-- NOTE: dq_validation_results table is planned but not yet created.
+-- DQ functions return results inline. This query will return empty until the table is created.
 FROM pc_insurance.dq.dq_validation_results
 WHERE validation_result = 'FAIL'
 AND DATE(validation_timestamp) = CURRENT_DATE()
