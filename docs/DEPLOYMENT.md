@@ -1249,12 +1249,12 @@ When deploying to another environment via DAB, update these variables in `databr
 
 **Deploy with variables:**
 ```bash
-databricks bundle deploy -t staging \
-  --var sql_warehouse_id=<staging-warehouse-id> \
-  --var supervisor_endpoint=<staging-supervisor-endpoint> \
-  --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
-  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
+databricks bundle deploy -t dev \
+  --var sql_warehouse_id=<your-warehouse-id> \
+  --var supervisor_endpoint=<your-supervisor-endpoint> \
+  --var workspace_root=/Users/<your-email>/InsuranceModel \
+  --var allowed_roots=/Users/<your-email>/InsuranceModel,/Repos/<your-user>/pc-insurance-medallion \
+  --var repo_path=/Repos/<your-user>/pc-insurance-medallion
 ```
 
 **⚠️ Note:** The Supervisor Agent, Genie Spaces, Knowledge Assistant, and serving endpoints must be created MANUALLY in each environment (Steps 1-6 above). The DAB bundle deploys the **pipeline job** only. The multi-agent system is environment-specific because it references workspace-local resources (Genie Space IDs, endpoint names, volume paths).
@@ -1339,10 +1339,6 @@ Ensures compliance with the **Mandatory Change Completion Policy**:
 - Runtime: 13.3 LTS or higher
 - Workers: 2-4 nodes (autoscaling 2-8)
 
-**Production Cluster** (future -- not yet deployed):
-- Runtime: 13.3 LTS or higher
-- Workers: 4-8 nodes (autoscaling 4-16)
-
 ### Validation Checklist
 
 - [ ] All Bronze tables populated with expected row counts
@@ -1356,20 +1352,16 @@ Ensures compliance with the **Mandatory Change Completion Policy**:
 
 ### Deploying to Another Environment
 
-> **Note**: Only the `dev` environment is currently active. Staging and prod targets are defined in `databricks.yml` for future use. To deploy to another environment, add the corresponding target to `databricks.yml` first.
-
-The same Git commit can be deployed to `dev`, `staging`, or `prod`:
+> **Note**: Only the `dev` environment is currently active. To deploy to another environment, add the corresponding target to `databricks.yml` first.
 
 ```bash
-databricks bundle deploy -t staging \
-  --var sql_warehouse_id=<staging-warehouse-id> \
-  --var supervisor_endpoint=<staging-supervisor-endpoint> \
-  --var workspace_root=/Users/<target-user>/InsuranceModel \
-  --var allowed_roots=/Users/<target-user>/InsuranceModel,/Repos/<target-user>/pc-insurance-medallion \
-  --var repo_path=/Repos/<target-user>/pc-insurance-medallion
+databricks bundle deploy -t dev \
+  --var sql_warehouse_id=<your-warehouse-id> \
+  --var supervisor_endpoint=<your-supervisor-endpoint> \
+  --var workspace_root=/Users/<your-email>/InsuranceModel \
+  --var allowed_roots=/Users/<your-email>/InsuranceModel,/Repos/<your-user>/pc-insurance-medallion \
+  --var repo_path=/Repos/<your-user>/pc-insurance-medallion
 ```
-
-Use the same command with `-t prod` and production values for production.
 
 ---
 
