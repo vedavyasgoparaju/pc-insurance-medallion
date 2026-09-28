@@ -200,6 +200,13 @@ pc-insurance-medallion/
 ├── execution/
 │   ├── orchestrator.py             # MCP server action orchestration
 │   └── plan_executor.py            # MCP server action execution
+├── swarm/
+│   ├── PC_Insurance_Swarm_Setup.py              # Swarm infra: UC catalog/schema, mapping tables, thresholds
+│   ├── PC_Insurance_Autonomy_Infrastructure_Setup.py  # Autonomy UC artifacts: DQ results, fix history, health log, health score fn
+│   ├── PC_Insurance_DQ_Functions_Setup.py       # 7 DQ SQL functions in pc_insurance.dq
+│   ├── PC_Insurance_Toolkit_Functions_Registration.py # 7 UC toolkit SQL functions in pc_insurance.metadata
+│   ├── PC_Insurance_Autonomous_Agent_Swarm.py   # LangGraph autonomous swarm (circuit breaker + rollback)
+│   └── PC_Insurance_Health_Monitor.py           # Health monitor notebook (6h schedule)
 ├── sql/
 │   ├── 01_catalog_schemas.sql      # Catalog and schema creation
 │   ├── 02_bronze_tables.sql        # Bronze table DDL
@@ -223,7 +230,7 @@ pc-insurance-medallion/
 
 ## Unity Catalog Setup
 
-The project uses a single catalog with five schemas:
+The project uses a single catalog with six schemas:
 
 ```sql
 -- Create catalog
@@ -236,6 +243,7 @@ CREATE SCHEMA IF NOT EXISTS pc_insurance.silver;
 CREATE SCHEMA IF NOT EXISTS pc_insurance.gold;
 CREATE SCHEMA IF NOT EXISTS pc_insurance.reference;
 CREATE SCHEMA IF NOT EXISTS pc_insurance.dq;
+CREATE SCHEMA IF NOT EXISTS pc_insurance.metadata;
 
 -- Create volume for P&C domain documents
 CREATE VOLUME IF NOT EXISTS pc_insurance.reference.pc_domain_docs;
@@ -249,6 +257,7 @@ GRANT USE SCHEMA ON SCHEMA pc_insurance.silver TO `principal-or-group`;
 GRANT USE SCHEMA ON SCHEMA pc_insurance.gold TO `principal-or-group`;
 GRANT USE SCHEMA ON SCHEMA pc_insurance.reference TO `principal-or-group`;
 GRANT USE SCHEMA ON SCHEMA pc_insurance.dq TO `principal-or-group`;
+GRANT USE SCHEMA ON SCHEMA pc_insurance.metadata TO `principal-or-group`;
 
 -- Verify
 SHOW SCHEMAS IN pc_insurance;
@@ -263,6 +272,7 @@ SHOW SCHEMAS IN pc_insurance;
 | `gold` | Business KPI aggregations (quarterly grain) |
 | `reference` | Documentation table, domain knowledge volume, metadata config |
 | `dq` | Data quality validation functions and results |
+| `metadata` | Swarm mapping tables, autonomy infrastructure (fix history, health monitor log), toolkit functions |
 
 ---
 
@@ -416,18 +426,19 @@ ORDER BY loss_ratio DESC;
 
 ### Phase 4: Job Orchestration Setup (20 minutes)
 
-The project uses 2 jobs with distinct purposes:
+The project uses 3 jobs with distinct purposes:
 
 | Job | Name | ID | Purpose |
 |---|---|---|---|
-| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only: 9 tasks — 5 parallel agent setups + swarm setup + DQ functions setup + toolkit functions setup + dependent Supervisor Agent setup |
+| 1 | `PC_Insurance_Agent_Setup` | `820361677269451` | Agent setup only: 10 tasks — 5 parallel agent setups + swarm setup + DQ functions setup + toolkit functions setup + autonomy infrastructure setup + dependent Supervisor Agent setup |
 | 2 | `PC_Insurance_Data_Pipeline` | `894776717783668` | Data pipeline: Bronze -> Silver -> Gold -> autonomous_swarm (on failure), parameterized by `load_type` (INITIAL or INCREMENTAL) |
+| 3 | `PC_Insurance_Health_Monitor` | `88172905444926` | Health monitor: Runs every 6h, computes pipeline_health_score, logs to health_monitor_log, alerts on degraded health |
 
 **Architecture**: Agents are set up FIRST (Job 1). Pipeline execution is triggered separately (Job 2) -- either on a schedule or on-demand via the Supervisor Agent + MCP app. The pipeline is NOT hardcoded in the agent setup job.
 
 #### Phase 4a: Agent Setup Job (Job 1)
 
-Job 1 (`PC_Insurance_Agent_Setup`) runs 9 tasks — 8 in parallel, then 1 dependent:
+Job 1 (`PC_Insurance_Agent_Setup`) runs 10 tasks — 8 in parallel + 1 after swarm/DQ setup, then 1 dependent:
 
 1. `architect_agent` -- Registers Architect MLflow model + serving endpoint (parallel)
 2. `data_engineer_agent` -- Registers Data Engineer MLflow model + serving endpoint (parallel)
@@ -437,7 +448,8 @@ Job 1 (`PC_Insurance_Agent_Setup`) runs 9 tasks — 8 in parallel, then 1 depend
 6. `dq_functions_setup` -- Registers 7 DQ SQL functions in `pc_insurance.dq` (parallel)
 7. `toolkit_functions_setup` -- Registers 7 UC toolkit SQL functions in `pc_insurance.metadata` (parallel)
 8. `mcp_app_deploy` -- Deploys MCP app `pc-insurance-workspace-actions` (parallel)
-9. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-8 complete)
+9. `autonomy_infrastructure_setup` -- Creates autonomy UC artifacts: `dq_validation_results`, `swarm_fix_history`, `health_monitor_log`, `pipeline_health_score` function (after swarm_setup + dq_functions_setup)
+10. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-9 complete)
 
 Run manually after Phase 1 (UC setup) and Phase 5 Step 1 (DQ functions) are complete:
 
@@ -483,7 +495,30 @@ databricks jobs run-now 894776717783668
 
 **Schedule** (optional): Set a cron schedule on Job 2 for automated incremental loads (e.g., daily at 2:00 AM UTC).
 
-#### Phase 4c: Databricks Asset Bundle (optional)
+#### Phase 4c: Health Monitor Job (Job 3)
+
+Job 3 (`PC_Insurance_Health_Monitor`) is the self-healing architecture's monitoring component. It runs on a 6-hour schedule and computes the composite `pipeline_health_score` for all pipeline tables.
+
+**Purpose**: Detects degraded pipeline health (stale tables, low DQ scores, high failure rates, circuit breaker activations) and logs results to `pc_insurance.metadata.health_monitor_log` for trend analysis and alerting.
+
+**Task**: Single notebook task running `swarm/PC_Insurance_Health_Monitor.py`, which:
+1. Computes `pc_insurance.dq.pipeline_health_score()` for each pipeline table
+2. Checks table freshness (stale table detection)
+3. Summarizes DQ pass rates from `pc_insurance.metadata.dq_validation_results`
+4. Calculates swarm success/failure rates from `pc_insurance.metadata.swarm_fix_history`
+5. Logs a health snapshot to `pc_insurance.metadata.health_monitor_log`
+6. Triggers alerts if health score drops below threshold (see `pc_insurance.metadata.threshold_controls`)
+
+**Schedule**: Every 6 hours (configurable). Adjust the cron schedule on Job 3 as needed.
+
+```bash
+# Trigger health monitor manually
+databricks jobs run-now 88172905444926
+```
+
+**Prerequisites**: Job 1 must be complete (autonomy infrastructure tables must exist). Job 2 should have run at least once for meaningful health data.
+
+#### Phase 4d: Databricks Asset Bundle (optional)
 
 The `databricks.yml` file defines bundle variables (`supervisor_endpoint`, `sql_warehouse_id`, `workspace_root`, etc.) but has no resource files in `resources/`. It is used for variable management only. If you need to deploy orchestrated jobs via DAB in the future, add resource YAML files to `resources/` and run:
 
@@ -493,7 +528,7 @@ databricks bundle validate
 databricks bundle deploy -t dev
 ```
 
-### Phase 4d: MCP App Deployment (10 minutes)
+### Phase 4e: MCP App Deployment (10 minutes)
 
 #### Deploy `pc-insurance-workspace-actions`
 
@@ -1380,8 +1415,6 @@ ORDER BY run_timestamp DESC LIMIT 10;
 **Diagnosis**:
 ```sql
 SELECT table_name, column_name, validation_rule, failed_record_count
--- NOTE: dq_validation_results table is planned but not yet created.
--- DQ functions return results inline. This query will return empty until the table is created.
 FROM pc_insurance.dq.dq_validation_results
 WHERE validation_result = 'FAIL'
 AND DATE(validation_timestamp) = CURRENT_DATE()
@@ -1450,6 +1483,6 @@ databricks apps logs pc-insurance-workspace-actions
 
 ---
 
-**Document Version**: 3.0  
-**Last Updated**: 2026-09-25  
+**Document Version**: 4.0  
+**Last Updated**: 2026-09-29  
 **Maintained By**: Data Engineering Team
