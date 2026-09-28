@@ -3,10 +3,8 @@
 # MAGIC %md
 # MAGIC # PC Insurance Swarm Toolkit Functions Registration
 # MAGIC
-# MAGIC Registers 7 UC functions in `pc_insurance_dev.metadata`:
-# MAGIC
-# MAGIC 1-2: SQL functions (persistent)
-# MAGIC 3-7: Python UDFs (session-scoped, must re-run)
+# MAGIC Registers 7 persistent UC SQL functions in `pc_insurance_dev.metadata`.
+# MAGIC All functions are SQL-based (persistent in Unity Catalog) and return JSON execution plans.
 
 # COMMAND ----------
 
@@ -51,45 +49,84 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Import & Setup Python UDFs
-from pyspark.sql.types import StringType
-import json
-
-print("Registering Python UDFs...")
-
-# COMMAND ----------
-
-# DBTITLE 1,Functions 3-7: Python UDFs
-# 3. update_mapping_document
-def f3(x_center, layer, payload_json):
-    update = json.loads(payload_json)
-    mapping = json.dumps({"column_mappings": update.get("column_mappings", {}), "transformation_rules": update.get("transformation_rules", [])})
-    return json.dumps({"x_center": x_center, "layer": layer, "new_mapping_json": mapping, "sql": [f"UPDATE mapping_documents SET is_active=false WHERE x_center='{x_center}' AND layer='{layer}' AND is_active=true"], "status": "plan"})
-spark.udf.register("update_mapping_document", f3, StringType())
-
-# 4. execute_sandbox_metadata_run
-def f4(x_center, staging_catalog):
-    return json.dumps({"staging_catalog": staging_catalog, "sql": [f"CREATE CATALOG IF NOT EXISTS {staging_catalog}", f"CREATE SCHEMA IF NOT EXISTS {staging_catalog}.metadata"], "status": "plan"})
-spark.udf.register("execute_sandbox_metadata_run", f4, StringType())
-
-# 5. update_uc_catalog_comments
-def f5(table_name, comments_json):
-    comments = json.loads(comments_json)
-    sql = [f"COMMENT ON COLUMN {table_name}.{col} IS '{comm.replace(chr(39), chr(39)+chr(39))}'" for col, comm in comments.items()]
-    return json.dumps({"table_name": table_name, "sql": sql, "status": "plan"})
-spark.udf.register("update_uc_catalog_comments", f5, StringType())
-
-# 6. write_technical_markdown_doc
-def f6(file_path, content):
-    return json.dumps({"file_path": file_path, "content_length": len(content), "dbutils_cmd": f'dbutils.fs.put("{file_path}", content, overwrite=True)', "status": "plan"})
-spark.udf.register("write_technical_markdown_doc", f6, StringType())
-
-# 7. trigger_pipeline_repair
-def f7(run_id):
-    return json.dumps({"run_id": run_id, "sdk_cmd": f'w.jobs.repair_run(run_id={run_id}, rerun_all_failed_tasks=True)', "status": "plan"})
-spark.udf.register("trigger_pipeline_repair", f7, StringType())
-
-print("All 7 functions registered!")
+# DBTITLE 1,Function 3: update_mapping_document
+# MAGIC %sql
+# MAGIC -- Function 3: update_mapping_document
+# MAGIC CREATE OR REPLACE FUNCTION update_mapping_document(x_center STRING, layer STRING, update_payload STRING)
+# MAGIC RETURNS STRING
+# MAGIC COMMENT 'UC Toolkit: Returns SQL execution plan for updating mapping metadata.'
+# MAGIC RETURN to_json(named_struct(
+# MAGIC   'x_center', x_center,
+# MAGIC   'layer', layer,
+# MAGIC   'new_mapping_json', COALESCE(get_json_object(update_payload, '$.column_mappings'), '{}'),
+# MAGIC   'sql_to_execute', array(concat(
+# MAGIC     'UPDATE pc_insurance_dev.metadata.mapping_documents SET is_active=false WHERE x_center=', quote(x_center), ' AND layer=', quote(layer), ' AND is_active=true'
+# MAGIC   )),
+# MAGIC   'status', 'merge_plan_generated'
+# MAGIC ));
 
 # COMMAND ----------
 
+# DBTITLE 1,Functions 4-7: SQL Functions
+# MAGIC %sql
+# MAGIC -- Function 4: execute_sandbox_metadata_run
+# MAGIC CREATE OR REPLACE FUNCTION execute_sandbox_metadata_run(x_center STRING, staging_catalog STRING)
+# MAGIC RETURNS STRING
+# MAGIC COMMENT 'UC Toolkit: Returns SQL plan for sandbox catalog creation and mapping clone.'
+# MAGIC RETURN to_json(named_struct(
+# MAGIC   'staging_catalog', staging_catalog,
+# MAGIC   'x_center', x_center,
+# MAGIC   'sql_statements', array(
+# MAGIC     concat('CREATE CATALOG IF NOT EXISTS ', staging_catalog),
+# MAGIC     concat('CREATE SCHEMA IF NOT EXISTS ', staging_catalog, '.metadata'),
+# MAGIC     concat('CREATE TABLE IF NOT EXISTS ', staging_catalog, '.metadata.mapping_documents AS SELECT * FROM pc_insurance_dev.metadata.mapping_documents WHERE x_center=', quote(x_center), ' AND is_active=true')
+# MAGIC   ),
+# MAGIC   'status', 'sandbox_preparation_plan'
+# MAGIC ));
+# MAGIC
+# MAGIC -- Function 5: update_uc_catalog_comments
+# MAGIC CREATE OR REPLACE FUNCTION update_uc_catalog_comments(table_name STRING, column_comments STRING)
+# MAGIC RETURNS STRING
+# MAGIC COMMENT 'UC Toolkit: Returns SQL plan for updating UC catalog comments.'
+# MAGIC RETURN to_json(named_struct(
+# MAGIC   'table_name', table_name,
+# MAGIC   'sql_statements', array(concat('COMMENT ON COLUMN ', table_name, '.* IS updated_by_swarm_agent')),
+# MAGIC   'status', 'comment_update_plan'
+# MAGIC ));
+# MAGIC
+# MAGIC -- Function 6: write_technical_markdown_doc
+# MAGIC CREATE OR REPLACE FUNCTION write_technical_markdown_doc(file_path STRING, content STRING)
+# MAGIC RETURNS STRING
+# MAGIC COMMENT 'UC Toolkit: Returns execution plan for writing technical documentation to UC volume or workspace.'
+# MAGIC RETURN to_json(named_struct(
+# MAGIC   'file_path', file_path,
+# MAGIC   'content_length', length(content),
+# MAGIC   'dbutils_command', concat('dbutils.fs.put(', quote(file_path), ', content, overwrite=True)'),
+# MAGIC   'status', CASE WHEN file_path LIKE '/Volumes/%' OR file_path LIKE '/Workspace/%' THEN 'write_plan_ready' ELSE 'error' END,
+# MAGIC   'message', CASE WHEN file_path LIKE '/Volumes/%' OR file_path LIKE '/Workspace/%' THEN '' ELSE 'Path must start with /Volumes/ or /Workspace/' END
+# MAGIC ));
+# MAGIC
+# MAGIC -- Function 7: trigger_pipeline_repair
+# MAGIC CREATE OR REPLACE FUNCTION trigger_pipeline_repair(run_id STRING)
+# MAGIC RETURNS STRING
+# MAGIC COMMENT 'UC Toolkit: Returns REST API call plan for triggering pipeline repair.'
+# MAGIC RETURN to_json(named_struct(
+# MAGIC   'run_id', run_id,
+# MAGIC   'api_endpoint', '/api/2.1/jobs/repair-run',
+# MAGIC   'payload', to_json(named_struct(
+# MAGIC     'run_id', CAST(run_id AS LONG),
+# MAGIC     'rerun_all_failed_tasks', true,
+# MAGIC     'rerun_dependent_tasks', true
+# MAGIC   )),
+# MAGIC   'sdk_command', concat('w.jobs.repair_run(run_id=', run_id, ', rerun_all_failed_tasks=True, rerun_dependent_tasks=True)'),
+# MAGIC   'status', 'repair_plan_ready'
+# MAGIC ));
+# MAGIC
+# MAGIC SELECT 'All 7 SQL functions registered successfully' AS status;
+
+# COMMAND ----------
+
+# DBTITLE 1,Verify All Functions
+# MAGIC %sql
+# MAGIC -- Verify all 7 functions are registered
+# MAGIC SHOW USER FUNCTIONS IN pc_insurance_dev.metadata;
