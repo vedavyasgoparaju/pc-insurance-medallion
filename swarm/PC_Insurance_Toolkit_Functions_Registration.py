@@ -39,11 +39,14 @@
 # MAGIC RETURNS STRING
 # MAGIC COMMENT 'UC Toolkit: Retrieves lineage from system.access.table_lineage'
 # MAGIC RETURN (
-# MAGIC   SELECT CONCAT('{"run_id": "', run_id, '", "source": "',
-# MAGIC     COALESCE(FIRST(source_table_full_name), ''), '", "target": "',
-# MAGIC     COALESCE(FIRST(target_table_full_name), '"}')
+# MAGIC   SELECT CONCAT(
+# MAGIC     '{"run_id": "', run_id, '",',
+# MAGIC     '"source": "', COALESCE(MAX(source_table_full_name), ''), '",',
+# MAGIC     '"target": "', COALESCE(MAX(target_table_full_name), ''), '"}'
+# MAGIC   )
 # MAGIC   FROM system.access.table_lineage
-# MAGIC   WHERE entity_run_id = run_id LIMIT 1
+# MAGIC   WHERE entity_run_id = run_id
+# MAGIC   LIMIT 1
 # MAGIC );
 
 # COMMAND ----------
