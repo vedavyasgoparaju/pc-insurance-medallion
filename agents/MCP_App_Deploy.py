@@ -114,8 +114,8 @@ if app_state == "RUNNING" and compute_state == "ACTIVE":
     print("\nApp is RUNNING. Deploying latest source...")
     deploy_app()
 
-elif app_state == "STOPPED":
-    print("\nApp is STOPPED. Starting...")
+elif app_state in ("STOPPED", "UNAVAILABLE"):
+    print(f"\nApp is {app_state}. Starting...")
     if start_app():
         print("  Waiting for app to become active...")
         time.sleep(10)
