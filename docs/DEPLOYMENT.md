@@ -977,6 +977,10 @@ databricks apps logs pc-insurance-workspace-actions
 
 The app should be in `RUNNING` state. If the app uses auto-detect for `SQL_WAREHOUSE_ID`, ensure at least one SQL warehouse exists.
 
+> **Note — UNAVAILABLE state**: If the app shows as `UNAVAILABLE` after deployment, this is a transient state during initial build. Wait 2-3 minutes and re-check with `databricks apps get pc-insurance-workspace-actions`. If it persists, verify the SQL warehouse is running and re-deploy with `databricks apps deploy pc-insurance-workspace-actions --source-dir swarm/mcp_app`. The deploy script (`mcp_app_deploy` job task) already handles this state gracefully and retries automatically.
+
+> **UNAVAILABLE State**: If the platform stops app compute (workspace/account status change), the app enters `UNAVAILABLE` state. The deployment notebook (`agents/MCP_App_Deploy.py`, task `mcp_app_deploy` in Job 1) handles this by treating `UNAVAILABLE` like `STOPPED` — it starts the app, waits, then deploys. No manual intervention needed.
+
 ---
 
 ### Step 6: Create Supervisor Agent with 8 Tools + Anti-Routing Rules (30 minutes)
