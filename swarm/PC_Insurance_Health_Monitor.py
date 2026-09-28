@@ -50,18 +50,22 @@ ROLLBACK_ALERT_THRESHOLD = 3  # Alert if 3+ rollbacks in 24h
 
 # Monitored tables (bronze, silver, gold layers)
 MONITORED_TABLES = [
-    f"{CATALOG}.bronze.policycenter_raw",
-    f"{CATALOG}.bronze.claimcenter_raw",
-    f"{CATALOG}.bronze.billingcenter_raw",
-    f"{CATALOG}.bronze.mga_feed_raw",
-    f"{CATALOG}.silver.policies_transformed",
-    f"{CATALOG}.silver.claims_transformed",
-    f"{CATALOG}.silver.billing_transformed",
-    f"{CATALOG}.silver.mga_transformed",
-    f"{CATALOG}.gold.premium_analytics",
-    f"{CATALOG}.gold.claims_analytics",
-    f"{CATALOG}.gold.loss_ratio_kpis",
-    f"{CATALOG}.gold.combined_ratio_kpis",
+    f"{CATALOG}.bronze.policies_raw",
+    f"{CATALOG}.bronze.claims_raw",
+    f"{CATALOG}.bronze.premiums_raw",
+    f"{CATALOG}.bronze.customers_raw",
+    f"{CATALOG}.bronze.agents_raw",
+    f"{CATALOG}.silver.policy_dim",
+    f"{CATALOG}.silver.claim_dim",
+    f"{CATALOG}.silver.claim_fact",
+    f"{CATALOG}.silver.customer_dim",
+    f"{CATALOG}.silver.premium_fact",
+    f"{CATALOG}.gold.loss_ratio_by_lob",
+    f"{CATALOG}.gold.claim_frequency_severity",
+    f"{CATALOG}.gold.retention_by_agent",
+    f"{CATALOG}.gold.premium_growth",
+    f"{CATALOG}.gold.exposure_summary",
+    f"{CATALOG}.gold.uw_dashboard_summary",
 ]
 
 w = WorkspaceClient()
@@ -188,7 +192,7 @@ def generate_alerts(health_score: float, freshness: dict, dq_summary: dict, swar
         alerts.append(f"⚠️  {len(stale_tables)} tables stale (>{FRESHNESS_THRESHOLD_HOURS}h): {', '.join(stale_tables[:3])}")
 
     # DQ alerts
-    dq_failed = dq_summary.get("failed", 0)
+    dq_failed = dq_summary.get("failed") or 0
     if dq_failed > 0:
         alerts.append(f"⚠️  {dq_failed} DQ validations failed in last 24h")
 
@@ -199,7 +203,7 @@ def generate_alerts(health_score: float, freshness: dict, dq_summary: dict, swar
     if swarm_summary.get("rollbacks", 0) >= ROLLBACK_ALERT_THRESHOLD:
         alerts.append(f"⚠️  {swarm_summary['rollbacks']} rollbacks in last 24h (threshold: {ROLLBACK_ALERT_THRESHOLD})")
 
-    if swarm_summary.get("circuit_breaker_hits", 0) > 0:
+    if (swarm_summary.get("circuit_breaker_hits") or 0) > 0:
         alerts.append(f"⚠️  Circuit breaker triggered {swarm_summary['circuit_breaker_hits']} times in last 24h")
 
     return alerts
@@ -227,23 +231,17 @@ def log_monitoring_event(health_score: float, freshness: dict, dq_summary: dict,
 
         spark.sql(f"""
             INSERT INTO {MONITOR_LOG_TABLE}
-            (log_id, log_timestamp, health_score, stale_table_count,
-             dq_pass_rate, swarm_success_rate, rollback_count_24h,
-             circuit_breaker_count_24h, alerts_json, freshness_json,
-             dq_summary_json, swarm_summary_json)
+            (event_id, event_timestamp, health_score, freshness_details,
+             dq_summary, swarm_summary, alerts, alert_count)
             VALUES (
                 '{event_id}',
                 TIMESTAMP('{timestamp}'),
                 {health_score},
-                {stale_count},
-                {dq_pass_rate},
-                {swarm_success},
-                {rollback_count},
-                {cb_count},
-                '{alerts_json}',
                 '{freshness_json}',
                 '{dq_json}',
-                '{swarm_json}'
+                '{swarm_json}',
+                '{alerts_json}',
+                {len(alerts)}
             )
         """)
         logger.info(f"Logged monitoring event {event_id}")
