@@ -12,6 +12,10 @@ dev = [
 environment_version = "5"
 
 # managed by databricks environments setup-local — do not edit
+dependencies = [
+    "langgraph>=0.2.63",
+    "langchain-core>=0.3.29",
+]
 [tool.uv]
 constraint-dependencies = [
     "aiohappyeyeballs~=2.4.4",
