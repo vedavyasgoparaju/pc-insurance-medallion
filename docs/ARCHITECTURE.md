@@ -225,32 +225,35 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 ### Agent Architecture
 
 ```
-                    ┌─────────────────────┐
-                    │  Supervisor Agent   │
-                    │   (Orchestrator)    │
-                    └──────────┬──────────┘
-                               │
-                ┌──────────────┼──────────────┐
-                │              │              │
-        ┌───────▼──────┐ ┌────▼─────┐ ┌─────▼──────┐
-        │  Architect   │ │   Data   │ │   Domain   │
-        │    Agent     │ │ Engineer │ │   Expert   │
-        └──────────────┘ └──────────┘ └────────────┘
-                │              │              │
-        ┌───────▼──────┐ ┌────▼─────┐ ┌─────▼──────┐
-        │   Analyst    │ │  DevOps  │ │     QA     │
-        │    Agent     │ │   Agent  │ │ Validator  │
-        └──────────────┘ └──────────┘ └────────────┘
-                │              │              
-        ┌───────▼──────────────▼──────┐
-        │ Documentation Agent         │
-        └────────────────────┬────────┘
-                             │
-                ┌────────────▼─────────────┐
-                │ Workspace-Actions (MCP)  │
-                │  (Git, File, SQL Exec)   │
-                └──────────────────────────┘
+                      ┌─────────────────────┐
+                      │  Supervisor Agent   │
+                      │   (Orchestrator)    │
+                      │ mas-fc596f26-endpoint│
+                      └──────────┬──────────┘
+                                 │
+         ┌───────────────────────┼───────────────────────┐
+         │                       │                       │
+ ┌───────▼───────┐    ┌──────────▼──────────┐   ┌───────▼───────┐
+ │  Unified      │    │  Domain Expert      │   │   Analyst     │
+ │  Agent        │    │  Agent (RAG)        │   │   Agent       │
+ │pc_insurance_  │    └────────────────────┘   │  Genie Space  │
+ │  agent        │                               └───────────────┘
+ └───────────────┘
+         │
+ ┌───────▼───────┐    ┌────────────────────┐   ┌───────────────┐
+ │  DevOps       │    │  QA Validator       │   │ Documentation │
+ │  Agent        │    │  calculate_dq_score │   │   Agent       │
+ │  Genie Space  │    └────────────────────┘   │  Genie Space  │
+ └───────────────┘                               └───────────────┘
+                                 │
+                      ┌──────────▼──────────┐
+                      │ Workspace-Actions   │
+                      │  (MCP App)          │
+                      │ Git, File, SQL Exec │
+                      └─────────────────────┘
 ```
+
+> **6 specialized tools + 1 MCP app = 7 total tools.** The Unified Agent (pc_insurance_agent) merges the former Architect and Data Engineer roles into a single ChatAgent with streaming support.
 
 ### Agent Communication Flow
 
