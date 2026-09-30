@@ -19,11 +19,16 @@
 
 # DBTITLE 1,Setup & Imports
 import mlflow
+from mlflow.pyfunc import ChatAgent
+from mlflow.types.agent import ChatAgentMessage, ChatAgentResponse, ChatContext
 from databricks.sdk import WorkspaceClient
+from databricks.agents import deploy
+from mlflow.models.resources import DatabricksServingEndpoint
 import os, tempfile
 
 w = WorkspaceClient()
 print(f"MLflow version: {mlflow.__version__}")
+print("✓ ChatAgent and databricks.agents.deploy available")
 
 # COMMAND ----------
 
@@ -142,30 +147,29 @@ print(f"Prompt length: {len(DE_SYSTEM_PROMPT)} characters")
 from mlflow.models import infer_signature
 from mlflow.models.resources import DatabricksServingEndpoint
 
-class DataEngineerAgent(mlflow.pyfunc.PythonModel):
+class DataEngineerAgent(ChatAgent):
     """P&C Insurance Pipeline Code Generator Agent"""
     
     def __init__(self):
+        super().__init__()
         self.system_prompt = DE_SYSTEM_PROMPT
     
-    def predict(self, context, model_input=None):
-        # Handle both old and new MLflow PythonModel signatures
-        if model_input is None:
-            # Old MLflow calls predict(model_input) without context
-            model_input = context
-            context = None
+    def predict(self, messages, context=None, custom_inputs=None):
+        """Process pipeline code generation questions via ChatAgent protocol.
         
-        # Call LLM with system prompt using Databricks Foundation Model API
+        Args:
+            messages: List of ChatAgentMessage objects (chat history)
+            context: Optional ChatContext with conversation metadata
+            custom_inputs: Optional dict of custom inputs
+            
+        Returns:
+            ChatAgentResponse with assistant message containing LLM response
+        """
         import mlflow.deployments
         
-        # Extract question from input
-        if isinstance(model_input, dict):
-            question = model_input.get("question", model_input.get("query", ""))
-        elif hasattr(model_input, 'iloc'):
-            row = model_input.iloc[0].to_dict() if len(model_input) > 0 else {}
-            question = row.get("question", row.get("query", ""))
-        else:
-            question = str(model_input)
+        # Extract the latest user message from chat history
+        user_messages = [m for m in messages if m.role == "user"]
+        question = user_messages[-1].content if user_messages else ""
         
         # Call foundation model with system prompt
         deploy_client = mlflow.deployments.get_deploy_client("databricks")
@@ -180,114 +184,93 @@ class DataEngineerAgent(mlflow.pyfunc.PythonModel):
                 "temperature": 0.3
             }
         )
-        answer = llm_response["choices"][0]["message"]["content"]
+        content = llm_response["choices"][0]["message"]["content"]
+        # gpt-oss-120b returns content as a list of structured objects (reasoning + text)
+        if isinstance(content, list):
+            text_parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+            answer = " ".join(text_parts) if text_parts else str(content)
+        else:
+            answer = content
         
-        return {
-            "agent": "DataEngineer",
-            "role": "Senior Data Engineer",
-            "question": question,
-            "response": answer
-        }
+        # Return ChatAgentResponse (NOT a plain dict) - enables streaming
+        import uuid
+        return ChatAgentResponse(
+            messages=[ChatAgentMessage(role="assistant", content=answer, id=str(uuid.uuid4()))]
+        )
 
+# Log the agent to MLflow as ChatAgent
+# IMPORTANT: Do NOT set explicit signature - ChatAgent auto-infers
+# ChatAgentRequest/ChatAgentResponse schemas and sets task: agent/v2/chat
 mlflow.set_experiment("/Users/vedavyas.goparaju@gmail.com/pc_insurance_agents")
 
-with mlflow.start_run(run_name="data_engineer_agent_v1") as run:
+with mlflow.start_run(run_name="data_engineer_agent_chatagent_v2") as run:
     mlflow.log_param("agent_type", "data_engineer")
     mlflow.log_param("domain", "pc_insurance")
     mlflow.log_param("role", "senior_data_engineer")
     mlflow.log_param("prompt_length", len(DE_SYSTEM_PROMPT))
+    mlflow.log_param("model_type", "ChatAgent")
+    mlflow.log_param("task", "agent/v2/chat")
     
     with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
         f.write(DE_SYSTEM_PROMPT)
         mlflow.log_artifact(f.name, artifact_path="system_prompt")
     
+    # Log WITHOUT explicit signature - ChatAgent auto-infers
     agent = DataEngineerAgent()
-    
-    # Create model signature (required for Unity Catalog registration)
-    import pandas as pd
-    sample_input = pd.DataFrame({"question": ["Write the Bronze pipeline code"]})
-    sample_output = pd.DataFrame({
-        "agent": ["DataEngineer"],
-        "role": ["Senior Data Engineer"],
-        "question": ["Write the Bronze pipeline code"],
-        "response": ["[Data Engineer Agent] Ready to generate pipeline code for: Write the Bronze pipeline code"],
-    })
-    signature = infer_signature(sample_input, sample_output)
-    
     mlflow.pyfunc.log_model(
         artifact_path="data_engineer_agent",
         python_model=agent,
         registered_model_name="workspace.default.pc_data_engineer_agent",
-        signature=signature,
         resources=[
             DatabricksServingEndpoint(endpoint_name="databricks-gpt-oss-120b")
         ],
     )
     
     print(f"Data Engineer Agent logged to MLflow: {run.info.run_id}")
-    print(f"Registered Model: pc_data_engineer_agent")
+    print(f"Registered Model: workspace.default.pc_data_engineer_agent")
+    print(f"Model type: ChatAgent (task: agent/v2/chat)")
     os.unlink(f.name)
 
 # COMMAND ----------
 
-# DBTITLE 1,Deploy Data Engineer Agent Endpoint
+# DBTITLE 1,Deploy Data Engineer Agent as ChatAgent Endpoint
 # ============================================
-# Deploy Data Engineer Agent as Serving Endpoint
+# Deploy Data Engineer Agent as ChatAgent Serving Endpoint
 # ============================================
 
-from databricks.sdk.service.serving import EndpointCoreConfigInput, ServedModelInput
+# databricks.agents.deploy() creates an agent-serving endpoint
+# that supports streaming (unlike w.serving_endpoints.create which
+# creates plain model endpoints without task field)
 
-# Get the latest model version via MLflow client
+# Get the latest model version
 import mlflow
 client = mlflow.tracking.MlflowClient()
 latest_versions = client.search_model_versions("name='workspace.default.pc_data_engineer_agent'")
 latest_version = max(int(mv.version) for mv in latest_versions)
-model_uri = f"models:/pc_data_engineer_agent/{latest_version}"
-
-print(f"Deploying model: {model_uri}")
+print(f"Deploying model version: {latest_version}")
 
 endpoint_name = "pc_data_engineer_agent"
-try:
-    from databricks.sdk.service.serving import TrafficConfig, Route
-    served_model_name = f"pc_data_engineer_agent-{latest_version}"
-    w.serving_endpoints.create(
-        name=endpoint_name,
-        config=EndpointCoreConfigInput(
-            name=endpoint_name,
-            served_models=[
-                ServedModelInput(
-                    model_name="workspace.default.pc_data_engineer_agent",
-                    model_version=str(latest_version),
-                    workload_size="Small",
-                    scale_to_zero_enabled=True,
-                    environment_vars={},
-                )
-            ],
-            traffic_config=TrafficConfig(
-                routes=[Route(served_model_name=served_model_name, traffic_percentage=100)]
-            ),
-        )
-    )
-    print(f"✓ Creating serving endpoint: {endpoint_name}")
-except Exception as e:
-    if "already exists" in str(e).lower() or "RESOURCE_ALREADY_EXISTS" in str(e):
-        print(f"Endpoint {endpoint_name} already exists - updating to v{latest_version}...")
-        from databricks.sdk.service.serving import ServedEntityInput
-        import time
-        for _ in range(10):
-            try:
-                w.serving_endpoints.update_config(name=endpoint_name, served_entities=[ServedEntityInput(entity_name="workspace.default.pc_data_engineer_agent", entity_version=str(latest_version), scale_to_zero_enabled=True, workload_size="Small")])
-                print(f"Updated {endpoint_name} to v{latest_version}")
-                break
-            except Exception as ue:
-                if "currently being updated" in str(ue): time.sleep(20)
-                else: print(f"Update note: {ue}"); break
-    else:
-        print(f"Note: {e}")
-        print(f"You can also deploy from the UI: Models → pc_data_engineer_agent → Create Serving Endpoint")
 
-print(f"\nEndpoint name: {endpoint_name}")
-print(f"\n✓ Data Engineer Agent is ready for the Supervisor Agent")
+# Delete old plain endpoint first (it was created without task field)
+try:
+    w.serving_endpoints.delete(name=endpoint_name)
+    print(f"Deleted old plain endpoint: {endpoint_name}")
+except Exception:
+    print(f"No existing endpoint to delete: {endpoint_name}")
+
+# Deploy as ChatAgent endpoint using databricks.agents.deploy()
+# This creates an endpoint with task: agent/v2/chat, enabling streaming
+agent_endpoint_info = deploy(
+    model_name="workspace.default.pc_data_engineer_agent",
+    model_version=latest_version,
+    endpoint_name=endpoint_name,
+    scale_to_zero=True,
+)
+
+print(f"\n✓ Deployed ChatAgent endpoint: {endpoint_name}")
+print(f"  Model: workspace.default.pc_data_engineer_agent v{latest_version}")
+print(f"  Task: agent/v2/chat (streaming enabled)")
+print(f"\n✓ Data Engineer Agent (ChatAgent) is ready for the Supervisor Agent")
 
 # COMMAND ----------
 
@@ -296,6 +279,7 @@ print(f"\n✓ Data Engineer Agent is ready for the Supervisor Agent")
 # Test the Data Engineer Agent
 # ============================================
 
+# Test locally using ChatAgent predict
 test_agent = DataEngineerAgent()
 test_questions = [
     "Write the Silver layer MERGE for policy_dim with SCD2",
@@ -304,8 +288,10 @@ test_questions = [
 ]
 
 for q in test_questions:
-    result = test_agent.predict({"question": q})
+    test_messages = [ChatAgentMessage(role="user", content=q)]
+    result = test_agent.predict(test_messages)
+    answer = result.messages[0].content if result.messages else "No response"
     print(f"\nQ: {q}")
-    print(f"A: {result['response']}")
+    print(f"A: {answer[:200]}...")
 
-print("\n✓ Data Engineer Agent is ready")
+print("\n✓ Data Engineer Agent (ChatAgent) is ready")
