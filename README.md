@@ -1,6 +1,6 @@
 # P&C Insurance Medallion Architecture on Databricks
 
-A multi-layered data platform for Property & Casualty Insurance built on Databricks, featuring Bronze/Silver/Gold pipelines, data quality functions, and a multi-agent system with 8 AI tools (7 subagents + 1 MCP server).
+A multi-layered data platform for Property & Casualty Insurance built on Databricks, featuring Bronze/Silver/Gold pipelines, data quality functions, and a multi-agent system with 7 AI tools (6 subagents + 1 MCP server).
 
 ## What's New: Metadata-Driven Bronze, Silver + Gold Layers
 

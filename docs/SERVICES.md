@@ -177,8 +177,8 @@ The Supervisor Agent is the central orchestrator of the multi-agent system. It h
 - Code implementation → Data Engineer (not Architect)
 
 **Key artifacts:**
-- Endpoint: `mas-3fcb11f6-endpoint` (status: READY)
-- Agent ID: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`
+- Endpoint: `mas-fc596f26-endpoint` (status: READY)
+- Agent ID: `fc596f26-066a-464d-94d9-9fc472b027dc`
 - Display name: "P&C Insurance Medallion Architecture Team"
 
 **Where configured:** `agents/Supervisor_Agent_Setup.py` (Job 1 task 9: `supervisor_agent_setup`, depends on tasks 1-8).

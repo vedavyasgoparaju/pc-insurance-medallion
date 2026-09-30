@@ -90,7 +90,7 @@ flowchart TB
     DQ -.->|"validates"| Gold
 
     subgraph Agents["🤖 Multi-Agent System — Supervisor Orchestrator"]
-        SUP["Supervisor Agent<br/>mas-3fcb11f6-endpoint"]
+        SUP["Supervisor Agent<br/>mas-fc596f26-endpoint"]
         ARCH["Unified Agent<br/>pc_insurance_agent"]
         DOM["Domain Expert Agent<br/>Knowledge Assistant (RAG)"]
         ANA["Analyst Agent<br/>Genie Space"]
@@ -275,8 +275,8 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 - ✅ Handle errors and fallback logic
 
 **Implementation**: `Supervisor_Agent.py`
-**Endpoint**: `mas-3fcb11f6-endpoint` (READY)
-**Agent ID**: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`
+**Endpoint**: `mas-fc596f26-endpoint` (READY)
+**Agent ID**: `fc596f26-066a-464d-94d9-9fc472b027dc`
 
 ### 2. Architect Agent
 
@@ -413,6 +413,85 @@ INSERT INTO gold_metric_config VALUES (
 ```
 
 **Audit Table**: `pc_insurance.reference.gold_load_audit` — tracks metric ID, refresh timestamp, status, row counts, metric values, DQ scores, execution time.
+
+---
+
+## Next-Level Agent Capabilities
+
+The P&C Insurance Medallion platform incorporates several advanced AI capabilities that go beyond basic agent orchestration. These features enable real-time interaction, end-to-end design-to-code workflows, and autonomous self-healing pipelines.
+
+### 1. ChatAgent with Streaming Responses
+
+The unified agent (`pc_insurance_agent`) is implemented as a subclass of `mlflow.pyfunc.ChatAgent` — a significant upgrade from the original `pyfunc.PythonModel` approach:
+
+| Capability | Old (pyfunc) | New (ChatAgent v2) |
+|---|---|---|
+| Response format | Raw JSON | ChatAgent messages (OpenAI-compatible) |
+| Streaming | Not supported | `predict_stream` yields `ChatAgentChunk` per token |
+| LLM integration | Direct SDK calls | `mlflow.deployments` client to `databricks-meta-llama-3-3-70b-instruct` |
+| Supervisor compatibility | Required custom parsing | Native ChatAgent protocol — Supervisor Agent consumes directly |
+
+**Why streaming matters**: Streaming enables real-time token-by-token responses in the Supervisor Agent chat interface. Users see architecture designs and pipeline code as it's generated, rather than waiting for the full response. This reduces perceived latency from minutes to seconds for complex design questions.
+
+### 2. End-to-End Design-to-Code in a Single Conversation
+
+The merged Architect agent (Principal Data Architect & Senior Data Engineer) eliminates the handoff between design and implementation that previously required routing between two separate agents. In a single conversation:
+
+1. **Design phase**: The agent designs Bronze/Silver/Gold schemas, defines UC governance, plans data flow topology
+2. **Implementation phase**: The same agent writes SDP code, SQL transformations, MERGE statements for SCD2, and DQ expectations — using the exact schemas it just designed
+3. **Consistency guarantee**: Because one agent owns both phases, there's no schema mismatch between design documents and implementation code
+
+The system prompt embeds all P&C table names, UC structure, and DQ function signatures, so the agent has full context for both design and code generation without additional lookups.
+
+### 3. Autonomous Self-Healing Pipelines
+
+When a pipeline task (Bronze, Silver, or Gold) fails, the system automatically triggers a LangGraph-based autonomous swarm to diagnose and fix the issue — no human intervention required.
+
+**Self-healing flow**:
+```
+Pipeline task fails → autonomous_swarm triggers (run_if=AT_LEAST_ONE_FAILED)
+  → Triage Agent fetches real error logs + queries fix knowledge base
+  → Business Analyst updates mapping metadata
+  → Data Engineer applies schema/code fixes
+  → QA validates fixes (calculate_dq_score)
+  → If DQ drops >10%: RollbackManager restores Delta table to pre-fix state
+  → If DQ passes: Deployment Agent triggers pipeline repair (jobs.repair_run)
+  → DependencyChecker verifies downstream tables are fresh
+```
+
+**Key safety mechanisms**:
+- **Circuit Breaker**: Halts after 3+ failed fix attempts on the same error signature within 6 hours — prevents infinite retry loops and escalating failures
+- **Fix Knowledge Base**: The Triage Agent queries `swarm_fix_history` for similar past successful resolutions before attempting a new fix — the system learns from every fix attempt
+- **Automated Rollback**: If a fix degrades DQ score by more than 10%, the RollbackManager restores the Delta table to its pre-fix state using `RESTORE TABLE`
+- **Dependency Verification**: After upstream fixes, the DependencyChecker validates downstream table freshness via Unity Catalog lineage
+
+### 4. Composite Health Monitoring
+
+A dedicated health monitor job (`PC_Insurance_Health_Monitor`) runs every 6 hours and computes a composite `pipeline_health_score()` for all pipeline tables:
+
+| Component | Weight | What it measures |
+|---|---|---|
+| Data Quality | 40% | DQ pass rate from `calculate_dq_score` across all tables |
+| Freshness | 25% | How recently each table was updated (stale detection) |
+| Reconciliation | 20% | Source vs target row count alignment |
+| Error Rate | 15% | Pipeline failure rate and swarm success/failure ratio |
+
+Health snapshots are logged to `pc_insurance.metadata.health_monitor_log` for trend analysis. Alerts trigger when the health score drops below the threshold defined in `pc_insurance.metadata.threshold_controls`.
+
+### 5. MCP-Powered Workspace Execution
+
+The `pc-insurance-workspace-actions` MCP app provides the Supervisor Agent with direct workspace execution capabilities — the only tool that can make changes:
+
+| Capability | Description |
+|---|---|
+| SQL execution | Run DDL/DML via SQL warehouse |
+| File writes | Create/update notebooks and files in the workspace |
+| Git automation | Stage, commit, and push changes to the remote repository |
+| Notebook execution | Run any notebook in the repo |
+| DQ checks | Trigger `calculate_dq_score` on any table |
+| Pipeline triggers | Trigger pipeline jobs (Bronze/Silver/Gold or autonomous swarm) |
+
+This MCP integration means users can ask the Supervisor Agent to design architecture, generate code, create tables, run pipelines, validate data quality, and commit changes — all through natural language conversation.
 
 ---
 
@@ -745,7 +824,7 @@ The Health Monitor computes a composite health score using `pipeline_health_scor
 The P&C Insurance Medallion Architecture provides:
 
 ✅ **Complete Data Pipeline**: Bronze → Silver → Gold with metadata-driven transformations  
-✅ **Multi-Agent System**: 8 specialized AI tools (7 subagents + 1 MCP server)  
+✅ **Multi-Agent System**: 7 specialized AI tools (6 subagents + 1 MCP server)  
 ✅ **Metadata-Driven**: No hardcoded logic, all configuration-based  
 ✅ **Data Quality**: Built-in validation, reconciliation, and audit logging  
 ✅ **Self-Healing Swarm**: Circuit breaker, fix knowledge base, automated rollback, dependency verification, health monitoring  
