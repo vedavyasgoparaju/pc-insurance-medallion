@@ -150,7 +150,7 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 <rect x="40" y="640" width="700" height="130" rx="8" class="group-bg" style="fill:#f0fff0;stroke:#32cd32"/>
 <text x="390" y="634" class="group-label" text-anchor="middle">Job Orchestration</text>
 
-<g id="comp-21" class="comp"><rect x="70" y="655" width="310" height="95" rx="5" fill="#32cd32" stroke="#228b22" stroke-width="1.5" opacity="0.85"/><text x="225" y="673" class="comp-label" fill="#fff">Job 1: Agent Setup (run once)</text><text x="225" y="688" class="comp-sub" fill="#e0ffe0">8 parallel + 1 dependent, ~20 min</text><text x="225" y="702" class="comp-sub" fill="#e0ffe0">ID: 820361677269451</text><text x="225" y="716" class="comp-sub" fill="#e0ffe0">Tasks: architect, data_eng, domain_exp,</text><text x="225" y="728" class="comp-sub" fill="#e0ffe0">analyst_genie, swarm, dq_fn, toolkit_fn,</text><text x="225" y="740" class="comp-sub" fill="#e0ffe0">mcp_app then supervisor_agent (dependent)</text></g>
+<g id="comp-21" class="comp"><rect x="70" y="655" width="310" height="95" rx="5" fill="#32cd32" stroke="#228b22" stroke-width="1.5" opacity="0.85"/><text x="225" y="673" class="comp-label" fill="#fff">Job 1: Agent Setup (run once)</text><text x="225" y="688" class="comp-sub" fill="#e0ffe0">7 parallel + 1 dependent, ~20 min</text><text x="225" y="702" class="comp-sub" fill="#e0ffe0">ID: 820361677269451</text><text x="225" y="716" class="comp-sub" fill="#e0ffe0">Tasks: unified_agent, domain_exp,</text><text x="225" y="728" class="comp-sub" fill="#e0ffe0">analyst_genie, swarm, dq_fn, toolkit_fn,</text><text x="225" y="740" class="comp-sub" fill="#e0ffe0">mcp_app then supervisor_agent (dependent)</text></g>
 
 <g id="comp-22" class="comp"><rect x="400" y="655" width="310" height="95" rx="5" fill="#32cd32" stroke="#228b22" stroke-width="1.5" opacity="0.85"/><text x="555" y="673" class="comp-label" fill="#fff">Job 2: Data Pipeline</text><text x="555" y="688" class="comp-sub" fill="#e0ffe0">Bronze to Silver to Gold to Swarm(on fail)</text><text x="555" y="702" class="comp-sub" fill="#e0ffe0">ID: 894776717783668</text><text x="555" y="716" class="comp-sub" fill="#e0ffe0">Param: load_type (INITIAL|INCREMENTAL)</text><text x="555" y="730" class="comp-sub" fill="#e0ffe0">autonomous_swarm: AT_LEAST_ONE_FAILED</text><text x="555" y="742" class="comp-sub" fill="#e0ffe0">Optional daily schedule</text></g>
 
@@ -410,11 +410,11 @@ Writes post-mortem to technical_docs volume</div>
 <foreignObject x="10" y="4" width="400" height="112">
   <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
     <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Job 1: Agent Setup</div>
-    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">8 parallel tasks deploy agents and infrastructure:
-architect, data_engineer, domain_expert,
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">7 parallel tasks deploy agents and infrastructure:
+unified_agent, domain_expert,
 analyst_genie, swarm_setup, dq_functions,
 toolkit_functions, mcp_app
-Task 9 (supervisor_agent_setup) runs after all
+Task 8 (supervisor_agent_setup) runs after all
 All tasks idempotent - safe to re-run</div>
   </div>
 </foreignObject></g>
