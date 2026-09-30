@@ -162,7 +162,7 @@ All use `CREATE OR REPLACE FUNCTION ... RETURN to_json(named_struct(...))` synta
 
 The Supervisor Agent is the central orchestrator of the multi-agent system. It has 7 registered tools:
 
-1. Architect Agent (subagent, unified: architecture design + pipeline code)
+1. Unified Agent (subagent: architecture design + pipeline code, merged)
 2. Domain Expert Agent (subagent)
 3. Analyst Agent (subagent)
 4. DevOps Agent (subagent)
@@ -173,15 +173,14 @@ The Supervisor Agent is the central orchestrator of the multi-agent system. It h
 **Anti-routing rules enforced:**
 - KPI questions → Analyst only (never DevOps)
 - Git execution → Workspace-Actions (DevOps is guidance only)
-- Architecture design → Architect (not Data Engineer)
-- Code implementation → Data Engineer (not Architect)
+- Architecture design AND code implementation → Unified Agent (not DevOps, not Analyst)
 
 **Key artifacts:**
 - Endpoint: `mas-fc596f26-endpoint` (status: READY)
 - Agent ID: `fc596f26-066a-464d-94d9-9fc472b027dc`
 - Display name: "P&C Insurance Medallion Architecture Team"
 
-**Where configured:** `agents/Supervisor_Agent_Setup.py` (Job 1 task 9: `supervisor_agent_setup`, depends on tasks 1-8).
+**Where configured:** `agents/Supervisor_Agent_Setup.py` (Job 1 task 9: `supervisor_agent_setup`, depends on tasks 1-7).
 
 ---
 
@@ -215,7 +214,7 @@ The agent:
 
 | Endpoint | Model | Workload | Scale |
 |---|---|---|---|
-| `pc_insurance_agent` | Unified Architect & Data Engineer Agent | Small | Scale-to-zero, streaming enabled |
+| `pc_insurance_agent` | Unified Agent (Architect + Data Engineer merged) | Small | Scale-to-zero, streaming enabled |
 
 Created via `w.serving_endpoints.create()` with `EndpointCoreConfigInput` and `ServedModelInput`. The Supervisor Agent calls these endpoints to route architecture and engineering questions.
 

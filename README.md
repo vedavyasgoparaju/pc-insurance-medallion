@@ -113,7 +113,7 @@ does not create a new hardcoded output path for each metric.
 
 Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 tools (6 subagents + 1 MCP server):
 
-1. **Architect** (serving_endpoint `pc_insurance_agent`) - Architecture & Pipeline design/code generation (merged)
+1. **Unified Agent** (serving_endpoint `pc_insurance_agent`) - Architecture design & pipeline code generation (merged, ChatAgent with streaming)
 2. **P&C Domain Expert** (volume `pc_insurance.reference.pc_domain_docs`) - P&C insurance domain knowledge
 3. **QA Validator** (uc_function `pc_insurance.dq.calculate_dq_score`) - Data quality validation
 4. **Analyst** (genie_space) - Gold layer KPI queries
@@ -121,17 +121,16 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 tools (6 su
 6. **DevOps** (genie_space) - Git/CI-CD GUIDANCE ONLY (no execution)
 7. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`) - EXECUTES workspace changes (git commits, file writes, SQL)
 
-**Supervisor Endpoint**: `fc596f26-066a-464d-94d9-9fc472b027dc` (READY)
+**Supervisor Endpoint**: `mas-fc596f26-endpoint` (READY)
 **Supervisor Agent ID**: `fc596f26-066a-464d-94d9-9fc472b027dc`
 
 ### Anti-Routing Rules
 
 1. KPI questions → **Analyst only** (never DevOps or Documentation)
 2. Git execution → **Workspace-Actions** (DevOps is guidance only)
-3. Architecture design → **Architect** (not Data Engineer)
-4. Code implementation → **Data Engineer** (not Architect)
-5. Domain definitions → **Domain Expert** (not Analyst)
-6. DevOps → **Guidance only** (cannot execute Git operations)
+3. Architecture design AND code implementation → **Unified Agent** (not DevOps, not Analyst)
+4. Domain definitions → **Domain Expert** (not Analyst)
+5. DevOps → **Guidance only** (cannot execute Git operations)
 
 ## Repository Structure
 
@@ -143,8 +142,9 @@ pc-insurance-medallion/
 │   ├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
 │   └── Orchestrator.py             # Master pipeline orchestrator
 ├── agents/
-│   ├── Architect_Agent.py           # MLflow agent for architecture design
-│   ├── Data_Engineer_Agent.py       # MLflow agent for pipeline code
+│   ├── Unified_Insurance_Agent.py   # Unified ChatAgent (architecture + pipeline code, streaming)
+│   ├── Architect_Agent.py           # DEPRECATED — superseded by Unified_Insurance_Agent
+│   ├── Data_Engineer_Agent.py       # DEPRECATED — superseded by Unified_Insurance_Agent
 │   ├── DevOps_Agent.py             # DevOps agent (MLflow)
 │   ├── Domain_Expert_Agent.py      # Domain expert agent setup
 │   ├── Domain_Expert_Setup.py       # UC volume with P&C reference docs

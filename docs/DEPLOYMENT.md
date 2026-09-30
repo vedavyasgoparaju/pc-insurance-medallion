@@ -185,8 +185,9 @@ pc-insurance-medallion/
 │   ├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
 │   └── Orchestrator.py             # Master pipeline orchestrator
 ├── agents/
-│   ├── Architect_Agent.py           # MLflow agent for architecture design
-│   ├── Data_Engineer_Agent.py       # MLflow agent for pipeline code
+│   ├── Unified_Insurance_Agent.py   # Unified ChatAgent (architecture + pipeline code, streaming)
+│   ├── Architect_Agent.py           # DEPRECATED — superseded by Unified_Insurance_Agent
+│   ├── Data_Engineer_Agent.py       # DEPRECATED — superseded by Unified_Insurance_Agent
 │   ├── DevOps_Agent.py             # DevOps agent (MLflow)
 │   ├── Domain_Expert_Agent.py      # Domain expert agent setup
 │   ├── Domain_Expert_Setup.py       # UC volume with P&C reference docs
