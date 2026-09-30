@@ -23,7 +23,7 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 .tooltip-box { fill: #1a1a2e; rx: 6; stroke: #4a4a6a; stroke-width: 1; }
 .tooltip-title { fill: #fff; font-size: 12px; font-weight: bold; }
 .tooltip-text { fill: #d0d0e0; font-size: 10px; }
-.tooltip-text tspan { dy: 13px; x: 0; }
+/* foreignObject handles text wrapping with CSS */
 .arrow { stroke: #999; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
 .arrow-dashed { stroke: #bbb; stroke-width: 1.5; fill: none; stroke-dasharray: 5,3; marker-end: url(#arrowhead-light); }
 .arrow-bold { stroke: #4a90d9; stroke-width: 2.5; fill: none; marker-end: url(#arrowhead-blue); }
@@ -180,32 +180,283 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 <!-- TOOLTIP LAYER (renders last for perfect z-index) -->
 <g id="tooltip-layer">
-  <g id="tooltip-0" class="tooltip" transform="translate(430, 65)"><rect class="tooltip-box" x="0" y="0" width="380" height="60"/><text class="tooltip-title" x="10" y="18">Source Systems</text><text class="tooltip-text" x="10" y="34"><tspan>External P&amp;C insurance systems providing raw</tspan><tspan>data: policies, claims, premiums, customers, agents</tspan></text></g>
-  <g id="tooltip-1" class="tooltip" transform="translate(70, 165)"><rect class="tooltip-box" x="0" y="0" width="390" height="90"/><text class="tooltip-title" x="10" y="18">Bronze Layer (Raw Ingestion)</text><text class="tooltip-text" x="10" y="34"><tspan>Tables: policies_raw, claims_raw,</tspan><tspan>premiums_raw, customers_raw, agents_raw</tspan><tspan>~3,050 records total · Delta Lake format</tspan><tspan>Partitioned by ingestion_date</tspan><tspan>Implemented by Bronze_Pipeline.py</tspan></text></g>
-  <g id="tooltip-2" class="tooltip" transform="translate(290, 165)"><rect class="tooltip-box" x="0" y="0" width="390" height="110"/><text class="tooltip-title" x="10" y="18">Silver Layer (Cleansed &amp; Conformed)</text><text class="tooltip-text" x="10" y="34"><tspan>4 dims (policy, claim, customer, agent) +</tspan><tspan>2 facts (premium, claim) + date_dim</tspan><tspan>SCD Type 2: is_current, effective_from/to</tspan><tspan>PII masking on customer names</tspan><tspan>Metadata-driven via silver_transformation_config</tspan><tspan>Audit: silver_load_audit, silver_reconciliation</tspan></text></g>
-  <g id="tooltip-3" class="tooltip" transform="translate(510, 165)"><rect class="tooltip-box" x="0" y="0" width="390" height="90"/><text class="tooltip-title" x="10" y="18">Gold Layer (Business KPIs)</text><text class="tooltip-text" x="10" y="34"><tspan>loss_ratio_by_lob, claim_frequency_severity,</tspan><tspan>retention_by_agent, premium_growth,</tspan><tspan>exposure_summary, uw_dashboard_summary</tspan><tspan>Metadata-driven via gold_metric_config</tspan><tspan>Audit: gold_load_audit · DQ scores tracked</tspan></text></g>
-  <g id="tooltip-4" class="tooltip" transform="translate(70, 240)"><rect class="tooltip-box" x="0" y="0" width="390" height="90"/><text class="tooltip-title" x="10" y="18">Reference Schema — Config &amp; Audit</text><text class="tooltip-text" x="10" y="34"><tspan>silver_transformation_config: SCD2/fact/dedup rules</tspan><tspan>gold_metric_config: KPI calculation logic</tspan><tspan>silver_load_audit: run status, row counts</tspan><tspan>silver_reconciliation: source vs target validation</tspan><tspan>gold_load_audit: refresh status, DQ scores</tspan></text></g>
-  <g id="tooltip-5" class="tooltip" transform="translate(290, 240)"><rect class="tooltip-box" x="0" y="0" width="400" height="100"/><text class="tooltip-title" x="10" y="18">DQ Schema — Data Quality Functions</text><text class="tooltip-text" x="10" y="34"><tspan>check_policy_exists, check_claim_status,</tspan><tspan>check_premium_positive, check_loss_ratio,</tspan><tspan>check_not_null, check_date_order</tspan><tspan>calculate_dq_score(total, failed) returns 0.0-1.0</tspan><tspan>Registered by dq_functions_setup (Job 1)</tspan><tspan>Checks: completeness, validity, consistency</tspan></text></g>
-  <g id="tooltip-6" class="tooltip" transform="translate(490, 240)"><rect class="tooltip-box" x="0" y="0" width="400" height="110"/><text class="tooltip-title" x="10" y="18">Metadata Schema — Swarm Infrastructure</text><text class="tooltip-text" x="10" y="34"><tspan>Tables: mapping_documents (7 rows, ACORD),</tspan><tspan>threshold_controls (4 rows, KPI thresholds)</tspan><tspan>Volume: technical_docs (post_mortems,</tspan><tspan>schema_docs, escalations)</tspan><tspan>7 toolkit SQL functions: read_mapping,</tspan><tspan>get_error_log, update_mapping, sandbox_run,</tspan><tspan>update_comments, write_doc, trigger_repair</tspan></text></g>
-  <g id="tooltip-7" class="tooltip" transform="translate(890, 155)"><rect class="tooltip-box" x="0" y="0" width="380" height="80"/><text class="tooltip-title" x="10" y="18">Supervisor Agent (Orchestrator)</text><text class="tooltip-text" x="10" y="34"><tspan>Endpoint: mas-fc596f26-endpoint (READY)</tspan><tspan>Agent ID: fc596f26-066a-464d-94d9-9fc472b027dc</tspan><tspan>Routes requests to 6 subagents + 1 MCP app</tspan><tspan>Anti-routing rules: KPI to Analyst, Git to MCP</tspan></text></g>
-  <g id="tooltip-8" class="tooltip" transform="translate(770, 220)"><rect class="tooltip-box" x="0" y="0" width="390" height="119"/><text class="tooltip-title" x="10" y="18">Unified Agent (Architect &amp; Data Engineer)</text><text class="tooltip-text" x="10" y="34"><tspan>Designs Bronze/Silver/Gold schemas AND implements</tspan><tspan>pipelines</tspan><tspan>Defines table structures, UC governance,</tspan><tspan>partitioning</tspan><tspan>Writes SDP code, SQL transformations, SCD2 logic, DQ</tspan><tspan>expectations</tspan><tspan>MLflow model: workspace.default.pc_unified_agent v2</tspan></text></g>
-  <g id="tooltip-9" class="tooltip" transform="translate(1030, 220)"><rect class="tooltip-box" x="0" y="0" width="370" height="70"/><text class="tooltip-title" x="10" y="18">Domain Expert Agent</text><text class="tooltip-text" x="10" y="34"><tspan>P&amp;C insurance domain knowledge (RAG)</tspan><tspan>UC Volume: pc_insurance.reference.pc_domain_docs</tspan><tspan>Explains loss ratios, frequency/severity, NAIC</tspan></text></g>
-  <g id="tooltip-10" class="tooltip" transform="translate(770, 280)"><rect class="tooltip-box" x="0" y="0" width="370" height="70"/><text class="tooltip-title" x="10" y="18">Analyst Agent</text><text class="tooltip-text" x="10" y="34"><tspan>Queries Gold layer KPIs via Genie Space</tspan><tspan>Loss ratio, frequency, severity, retention</tspan><tspan>Genie Space: PC_Insurance_Analyst</tspan></text></g>
-  <g id="tooltip-11" class="tooltip" transform="translate(900, 280)"><rect class="tooltip-box" x="0" y="0" width="370" height="70"/><text class="tooltip-title" x="10" y="18">DevOps Agent (Guidance Only)</text><text class="tooltip-text" x="10" y="34"><tspan>Advises on Git workflows and branching</tspan><tspan>Guides CI/CD, DAB deployment</tspan><tspan>Cannot execute Git ops (MCP app does that)</tspan></text></g>
-  <g id="tooltip-12" class="tooltip" transform="translate(1030, 280)"><rect class="tooltip-box" x="0" y="0" width="370" height="70"/><text class="tooltip-title" x="10" y="18">QA Validator Agent</text><text class="tooltip-text" x="10" y="34"><tspan>Runs DQ checks via calculate_dq_score</tspan><tspan>Validates completeness, validity, consistency</tspan><tspan>Checks business rule compliance</tspan></text></g>
-  <g id="tooltip-13" class="tooltip" transform="translate(900, 340)"><rect class="tooltip-box" x="0" y="0" width="370" height="60"/><text class="tooltip-title" x="10" y="18">Workspace-Actions MCP App</text><text class="tooltip-text" x="10" y="34"><tspan>Executes: git commits, file writes, SQL execution</tspan><tspan>App: pc-insurance-workspace-actions</tspan><tspan>DevOps Agent provides guidance; MCP executes</tspan></text></g>
-  <g id="tooltip-14" class="tooltip" transform="translate(70, 525)"><rect class="tooltip-box" x="0" y="0" width="360" height="50"/><text class="tooltip-title" x="10" y="18">Swarm Supervisor</text><text class="tooltip-text" x="10" y="34"><tspan>Orchestrates Plan-Execute-Verify-Deploy loop</tspan><tspan>Max 5 ReAct iterations, $25 token budget</tspan></text></g>
-  <g id="tooltip-15" class="tooltip" transform="translate(235, 525)"><rect class="tooltip-box" x="0" y="0" width="360" height="50"/><text class="tooltip-title" x="10" y="18">Triage Agent</text><text class="tooltip-text" x="10" y="34"><tspan>Fetches real error logs via jobs.get_run()</tspan><tspan>and jobs.get_run_output() for analysis</tspan></text></g>
-  <g id="tooltip-16" class="tooltip" transform="translate(400, 525)"><rect class="tooltip-box" x="0" y="0" width="360" height="50"/><text class="tooltip-title" x="10" y="18">Business Analyst (Swarm)</text><text class="tooltip-text" x="10" y="34"><tspan>Updates mapping metadata in</tspan><tspan>pc_insurance.metadata.mapping_documents</tspan></text></g>
-  <g id="tooltip-17" class="tooltip" transform="translate(565, 525)"><rect class="tooltip-box" x="0" y="0" width="360" height="50"/><text class="tooltip-title" x="10" y="18">Data Engineer (Swarm)</text><text class="tooltip-text" x="10" y="34"><tspan>Applies schema/code fixes using the 7</tspan><tspan>toolkit SQL functions in pc_insurance.metadata</tspan></text></g>
-  <g id="tooltip-18" class="tooltip" transform="translate(730, 525)"><rect class="tooltip-box" x="0" y="0" width="360" height="50"/><text class="tooltip-title" x="10" y="18">QA Validator (Swarm)</text><text class="tooltip-text" x="10" y="34"><tspan>Validates fixes using calculate_dq_score</tspan><tspan>Checks DQ score meets threshold (>=0.90)</tspan></text></g>
-  <g id="tooltip-19" class="tooltip" transform="translate(895, 525)"><rect class="tooltip-box" x="0" y="0" width="360" height="60"/><text class="tooltip-title" x="10" y="18">Deployment Agent (Swarm)</text><text class="tooltip-text" x="10" y="34"><tspan>Triggers pipeline repair via jobs.repair_run()</tspan><tspan>Reruns all failed tasks + dependent tasks</tspan><tspan>Writes post-mortem to technical_docs volume</tspan></text></g>
-  <g id="tooltip-20" class="tooltip" transform="translate(1060, 540)"><rect class="tooltip-box" x="0" y="0" width="340" height="60"/><text class="tooltip-title" x="10" y="18">Swarm Trigger Paths</text><text class="tooltip-text" x="10" y="34"><tspan>1. Automatic: Pipeline task fail triggers swarm</tspan><tspan>2. Manual: Standalone job 774564996988013</tspan><tspan>3. Interactive: Supervisor Agent chat to MCP</tspan></text></g>
-  <g id="tooltip-21" class="tooltip" transform="translate(70, 755)"><rect class="tooltip-box" x="0" y="0" width="420" height="90"/><text class="tooltip-title" x="10" y="18">Job 1: Agent Setup</text><text class="tooltip-text" x="10" y="34"><tspan>8 parallel tasks deploy agents and infrastructure:</tspan><tspan>architect, data_engineer, domain_expert,</tspan><tspan>analyst_genie, swarm_setup, dq_functions,</tspan><tspan>toolkit_functions, mcp_app</tspan><tspan>Task 9 (supervisor_agent_setup) runs after all</tspan><tspan>All tasks idempotent - safe to re-run</tspan></text></g>
-  <g id="tooltip-22" class="tooltip" transform="translate(400, 755)"><rect class="tooltip-box" x="0" y="0" width="420" height="80"/><text class="tooltip-title" x="10" y="18">Job 2: Data Pipeline</text><text class="tooltip-text" x="10" y="34"><tspan>Sequential: Bronze then Silver then Gold</tspan><tspan>autonomous_swarm triggers on any task failure</tspan><tspan>load_type parameter: INITIAL (full) or</tspan><tspan>INCREMENTAL (delta) processing mode</tspan><tspan>On-demand via Supervisor Agent + MCP app</tspan></text></g>
-  <g id="tooltip-23" class="tooltip" transform="translate(790, 705)"><rect class="tooltip-box" x="0" y="0" width="340" height="50"/><text class="tooltip-title" x="10" y="18">BI Dashboards (Planned — Not Yet Built)</text><text class="tooltip-text" x="10" y="34"><tspan>AI/BI dashboards on Gold layer KPIs</tspan><tspan>Future: uw_dashboard_summary, loss_ratio_by_lob</tspan></text></g>
-  <g id="tooltip-24" class="tooltip" transform="translate(915, 705)"><rect class="tooltip-box" x="0" y="0" width="360" height="50"/><text class="tooltip-title" x="10" y="18">Analyst Agent Queries (Active)</text><text class="tooltip-text" x="10" y="34"><tspan>Natural-language queries via Genie Space</tspan><tspan>Genie Space: PC_Insurance_Analyst</tspan></text></g>
-  <g id="tooltip-25" class="tooltip" transform="translate(1040, 705)"><rect class="tooltip-box" x="0" y="0" width="340" height="50"/><text class="tooltip-title" x="10" y="18">ML Models (Planned — Not Yet Built)</text><text class="tooltip-text" x="10" y="34"><tspan>Fraud detection, claim prediction, churn</tspan><tspan>Listed in ARCHITECTURE.md Future Enhancements</tspan></text></g>
+  <g id="tooltip-0" class="tooltip" transform="translate(430, 65)">
+<rect class="tooltip-box" x="0" y="0" width="380" height="64"/>
+<foreignObject x="10" y="4" width="360" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Source Systems</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">External P&amp;C insurance systems providing raw
+data: policies, claims, premiums, customers, agents</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-1" class="tooltip" transform="translate(70, 165)">
+<rect class="tooltip-box" x="0" y="0" width="390" height="106"/>
+<foreignObject x="10" y="4" width="370" height="98">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Bronze Layer (Raw Ingestion)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Tables: policies_raw, claims_raw,
+premiums_raw, customers_raw, agents_raw
+~3,050 records total · Delta Lake format
+Partitioned by ingestion_date
+Implemented by Bronze_Pipeline.py</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-2" class="tooltip" transform="translate(290, 165)">
+<rect class="tooltip-box" x="0" y="0" width="390" height="120"/>
+<foreignObject x="10" y="4" width="370" height="112">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Silver Layer (Cleansed &amp; Conformed)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">4 dims (policy, claim, customer, agent) +
+2 facts (premium, claim) + date_dim
+SCD Type 2: is_current, effective_from/to
+PII masking on customer names
+Metadata-driven via silver_transformation_config
+Audit: silver_load_audit, silver_reconciliation</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-3" class="tooltip" transform="translate(510, 165)">
+<rect class="tooltip-box" x="0" y="0" width="390" height="106"/>
+<foreignObject x="10" y="4" width="370" height="98">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Gold Layer (Business KPIs)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">loss_ratio_by_lob, claim_frequency_severity,
+retention_by_agent, premium_growth,
+exposure_summary, uw_dashboard_summary
+Metadata-driven via gold_metric_config
+Audit: gold_load_audit · DQ scores tracked</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-4" class="tooltip" transform="translate(70, 240)">
+<rect class="tooltip-box" x="0" y="0" width="390" height="106"/>
+<foreignObject x="10" y="4" width="370" height="98">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Reference Schema — Config &amp; Audit</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">silver_transformation_config: SCD2/fact/dedup rules
+gold_metric_config: KPI calculation logic
+silver_load_audit: run status, row counts
+silver_reconciliation: source vs target validation
+gold_load_audit: refresh status, DQ scores</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-5" class="tooltip" transform="translate(290, 240)">
+<rect class="tooltip-box" x="0" y="0" width="400" height="120"/>
+<foreignObject x="10" y="4" width="380" height="112">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">DQ Schema — Data Quality Functions</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">check_policy_exists, check_claim_status,
+check_premium_positive, check_loss_ratio,
+check_not_null, check_date_order
+calculate_dq_score(total, failed) returns 0.0-1.0
+Registered by dq_functions_setup (Job 1)
+Checks: completeness, validity, consistency</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-6" class="tooltip" transform="translate(490, 240)">
+<rect class="tooltip-box" x="0" y="0" width="400" height="134"/>
+<foreignObject x="10" y="4" width="380" height="126">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Metadata Schema — Swarm Infrastructure</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Tables: mapping_documents (7 rows, ACORD),
+threshold_controls (4 rows, KPI thresholds)
+Volume: technical_docs (post_mortems,
+schema_docs, escalations)
+7 toolkit SQL functions: read_mapping,
+get_error_log, update_mapping, sandbox_run,
+update_comments, write_doc, trigger_repair</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-7" class="tooltip" transform="translate(890, 155)">
+<rect class="tooltip-box" x="0" y="0" width="380" height="92"/>
+<foreignObject x="10" y="4" width="360" height="84">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Supervisor Agent (Orchestrator)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Endpoint: mas-fc596f26-endpoint (READY)
+Agent ID: fc596f26-066a-464d-94d9-9fc472b027dc
+Routes requests to 6 subagents + 1 MCP app
+Anti-routing rules: KPI to Analyst, Git to MCP</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-8" class="tooltip" transform="translate(770, 220)">
+<rect class="tooltip-box" x="0" y="0" width="390" height="134"/>
+<foreignObject x="10" y="4" width="370" height="126">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Unified Agent (Architect &amp; Data Engineer)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Designs Bronze/Silver/Gold schemas AND implements
+pipelines
+Defines table structures, UC governance,
+partitioning
+Writes SDP code, SQL transformations, SCD2 logic, DQ
+expectations
+MLflow model: workspace.default.pc_unified_agent v2</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-9" class="tooltip" transform="translate(1030, 220)">
+<rect class="tooltip-box" x="0" y="0" width="370" height="78"/>
+<foreignObject x="10" y="4" width="350" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Domain Expert Agent</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">P&amp;C insurance domain knowledge (RAG)
+UC Volume: pc_insurance.reference.pc_domain_docs
+Explains loss ratios, frequency/severity, NAIC</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-10" class="tooltip" transform="translate(770, 280)">
+<rect class="tooltip-box" x="0" y="0" width="370" height="78"/>
+<foreignObject x="10" y="4" width="350" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Analyst Agent</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Queries Gold layer KPIs via Genie Space
+Loss ratio, frequency, severity, retention
+Genie Space: PC_Insurance_Analyst</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-11" class="tooltip" transform="translate(900, 280)">
+<rect class="tooltip-box" x="0" y="0" width="370" height="78"/>
+<foreignObject x="10" y="4" width="350" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">DevOps Agent (Guidance Only)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Advises on Git workflows and branching
+Guides CI/CD, DAB deployment
+Cannot execute Git ops (MCP app does that)</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-12" class="tooltip" transform="translate(1030, 280)">
+<rect class="tooltip-box" x="0" y="0" width="370" height="78"/>
+<foreignObject x="10" y="4" width="350" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">QA Validator Agent</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Runs DQ checks via calculate_dq_score
+Validates completeness, validity, consistency
+Checks business rule compliance</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-13" class="tooltip" transform="translate(900, 340)">
+<rect class="tooltip-box" x="0" y="0" width="370" height="78"/>
+<foreignObject x="10" y="4" width="350" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Workspace-Actions MCP App</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Executes: git commits, file writes, SQL execution
+App: pc-insurance-workspace-actions
+DevOps Agent provides guidance; MCP executes</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-14" class="tooltip" transform="translate(70, 525)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="64"/>
+<foreignObject x="10" y="4" width="340" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Swarm Supervisor</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Orchestrates Plan-Execute-Verify-Deploy loop
+Max 5 ReAct iterations, $25 token budget</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-15" class="tooltip" transform="translate(235, 525)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="64"/>
+<foreignObject x="10" y="4" width="340" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Triage Agent</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Fetches real error logs via jobs.get_run()
+and jobs.get_run_output() for analysis</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-16" class="tooltip" transform="translate(400, 525)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="64"/>
+<foreignObject x="10" y="4" width="340" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Business Analyst (Swarm)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Updates mapping metadata in
+pc_insurance.metadata.mapping_documents</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-17" class="tooltip" transform="translate(565, 525)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="64"/>
+<foreignObject x="10" y="4" width="340" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Data Engineer (Swarm)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Applies schema/code fixes using the 7
+toolkit SQL functions in pc_insurance.metadata</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-18" class="tooltip" transform="translate(730, 525)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="64"/>
+<foreignObject x="10" y="4" width="340" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">QA Validator (Swarm)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Validates fixes using calculate_dq_score
+Checks DQ score meets threshold (>=0.90)</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-19" class="tooltip" transform="translate(895, 525)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="78"/>
+<foreignObject x="10" y="4" width="340" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Deployment Agent (Swarm)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Triggers pipeline repair via jobs.repair_run()
+Reruns all failed tasks + dependent tasks
+Writes post-mortem to technical_docs volume</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-20" class="tooltip" transform="translate(1060, 540)">
+<rect class="tooltip-box" x="0" y="0" width="340" height="78"/>
+<foreignObject x="10" y="4" width="320" height="70">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Swarm Trigger Paths</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">1. Automatic: Pipeline task fail triggers swarm
+2. Manual: Standalone job 774564996988013
+3. Interactive: Supervisor Agent chat to MCP</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-21" class="tooltip" transform="translate(70, 755)">
+<rect class="tooltip-box" x="0" y="0" width="420" height="120"/>
+<foreignObject x="10" y="4" width="400" height="112">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Job 1: Agent Setup</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">8 parallel tasks deploy agents and infrastructure:
+architect, data_engineer, domain_expert,
+analyst_genie, swarm_setup, dq_functions,
+toolkit_functions, mcp_app
+Task 9 (supervisor_agent_setup) runs after all
+All tasks idempotent - safe to re-run</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-22" class="tooltip" transform="translate(400, 755)">
+<rect class="tooltip-box" x="0" y="0" width="420" height="106"/>
+<foreignObject x="10" y="4" width="400" height="98">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Job 2: Data Pipeline</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Sequential: Bronze then Silver then Gold
+autonomous_swarm triggers on any task failure
+load_type parameter: INITIAL (full) or
+INCREMENTAL (delta) processing mode
+On-demand via Supervisor Agent + MCP app</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-23" class="tooltip" transform="translate(790, 705)">
+<rect class="tooltip-box" x="0" y="0" width="340" height="64"/>
+<foreignObject x="10" y="4" width="320" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">BI Dashboards (Planned — Not Yet Built)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">AI/BI dashboards on Gold layer KPIs
+Future: uw_dashboard_summary, loss_ratio_by_lob</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-24" class="tooltip" transform="translate(915, 705)">
+<rect class="tooltip-box" x="0" y="0" width="360" height="64"/>
+<foreignObject x="10" y="4" width="340" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">Analyst Agent Queries (Active)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Natural-language queries via Genie Space
+Genie Space: PC_Insurance_Analyst</div>
+  </div>
+</foreignObject></g>
+  <g id="tooltip-25" class="tooltip" transform="translate(1040, 705)">
+<rect class="tooltip-box" x="0" y="0" width="340" height="64"/>
+<foreignObject x="10" y="4" width="320" height="56">
+  <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="color: #fff; font-size: 12px; font-weight: bold; margin-bottom: 4px;">ML Models (Planned — Not Yet Built)</div>
+    <div style="color: #d0d0e0; font-size: 10px; line-height: 1.3; word-wrap: break-word; overflow-wrap: break-word; white-space: pre-wrap;">Fraud detection, claim prediction, churn
+Listed in ARCHITECTURE.md Future Enhancements</div>
+  </div>
+</foreignObject></g>
 </g>
 
 </svg>
