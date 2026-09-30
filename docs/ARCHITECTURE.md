@@ -30,7 +30,7 @@
 The P&C Insurance Medallion Architecture is a comprehensive data platform built on Databricks that implements:
 
 - **Medallion Architecture**: Bronze → Silver → Gold layers
-- **Multi-Agent System**: 8 specialized AI tools (7 agents + 1 MCP server) for different domains
+- **Multi-Agent System**: 7 specialized AI tools (6 agents + 1 MCP server) for different domains
 - **Self-Healing Pipelines**: Autonomous swarm with circuit breaker, knowledge-based fixes, automated rollback, and health monitoring
 - **Metadata-Driven Pipelines**: Configuration-based Silver and Gold transformations
 - **Unity Catalog Governance**: Centralized data governance and security

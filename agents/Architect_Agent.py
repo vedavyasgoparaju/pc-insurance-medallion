@@ -1,4 +1,4 @@
-# Databricks notebook source
+# DEPRECATED (2026-09-30): Superseded by agents/Unified_Insurance_Agent. Merged into single ChatAgent (pc_insurance_agent).
 
 
 # COMMAND ----------

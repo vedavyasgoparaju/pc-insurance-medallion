@@ -160,14 +160,14 @@ All use `CREATE OR REPLACE FUNCTION ... RETURN to_json(named_struct(...))` synta
 
 **How it's used here:**
 
-The Supervisor Agent is the central orchestrator of the multi-agent system. It has 8 registered tools:
+The Supervisor Agent is the central orchestrator of the multi-agent system. It has 7 registered tools:
 
-1. Architect Agent (subagent)
-2. Data Engineer Agent (subagent)
-3. Domain Expert Agent (subagent)
-4. Analyst Agent (subagent)
-5. DevOps Agent (subagent)
-6. QA Validator (UC function)
+1. Architect Agent (subagent, unified: architecture design + pipeline code)
+2. Domain Expert Agent (subagent)
+3. Analyst Agent (subagent)
+4. DevOps Agent (subagent)
+5. QA Validator (UC function)
+6. Documentation Agent (subagent)
 7. Workspace-Actions MCP App (tool)
 
 **Anti-routing rules enforced:**
