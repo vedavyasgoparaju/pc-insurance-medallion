@@ -111,19 +111,18 @@ does not create a new hardcoded output path for each metric.
 
 ## Multi-Agent System
 
-Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 8 tools (7 subagents + 1 MCP server):
+Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 tools (6 subagents + 1 MCP server):
 
-1. **Architect** (serving_endpoint `pc_architect_agent`) - Architecture design
-2. **Data Engineer** (serving_endpoint `pc_data_engineer_agent`) - Pipeline code generation
-3. **P&C Domain Expert** (volume `pc_insurance.reference.pc_domain_docs`) - P&C insurance domain knowledge
-4. **QA Validator** (uc_function `pc_insurance.dq.calculate_dq_score`) - Data quality validation
-5. **Analyst** (genie_space) - Gold layer KPI queries
-6. **Documentation** (genie_space) - Technical documentation
-7. **DevOps** (genie_space) - Git/CI-CD GUIDANCE ONLY (no execution)
-8. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`) - EXECUTES workspace changes (git commits, file writes, SQL)
+1. **Architect** (serving_endpoint `pc_insurance_agent`) - Architecture & Pipeline design/code generation (merged)
+2. **P&C Domain Expert** (volume `pc_insurance.reference.pc_domain_docs`) - P&C insurance domain knowledge
+3. **QA Validator** (uc_function `pc_insurance.dq.calculate_dq_score`) - Data quality validation
+4. **Analyst** (genie_space) - Gold layer KPI queries
+5. **Documentation** (genie_space) - Technical documentation
+6. **DevOps** (genie_space) - Git/CI-CD GUIDANCE ONLY (no execution)
+7. **Workspace-Actions** (MCP app `pc-insurance-workspace-actions`) - EXECUTES workspace changes (git commits, file writes, SQL)
 
-**Supervisor Endpoint**: `mas-3fcb11f6-endpoint` (READY)
-**Supervisor Agent ID**: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`
+**Supervisor Endpoint**: `fc596f26-066a-464d-94d9-9fc472b027dc` (READY)
+**Supervisor Agent ID**: `fc596f26-066a-464d-94d9-9fc472b027dc`
 
 ### Anti-Routing Rules
 

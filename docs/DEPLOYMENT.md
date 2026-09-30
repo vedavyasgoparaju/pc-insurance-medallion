@@ -85,7 +85,7 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pc_insurance.dq TO `principal-or-group`
 | Permission | Why Needed |
 |---|---|
 | Create MLflow experiment | Log Architect and Data Engineer agent models |
-| Register models in UC Model Registry | Register `pc_architect_agent`, `pc_data_engineer_agent` |
+| Register models in UC Model Registry | Register `pc_unified_agent` (ChatAgent) |
 | Create serving endpoints | Deploy models as serving endpoints |
 | `CAN_MANAGE` on serving endpoints | Configure and update endpoints |
 
@@ -440,8 +440,7 @@ The project uses 3 jobs with distinct purposes:
 
 Job 1 (`PC_Insurance_Agent_Setup`) runs 10 tasks — 8 in parallel + 1 after swarm/DQ setup, then 1 dependent:
 
-1. `architect_agent` -- Registers Architect MLflow model + serving endpoint (parallel)
-2. `data_engineer_agent` -- Registers Data Engineer MLflow model + serving endpoint (parallel)
+1. `architect_agent` -- Registers Unified Insurance Agent MLflow ChatAgent model + serving endpoint `pc_insurance_agent` (parallel)
 3. `domain_expert_setup` -- Creates UC volume + Knowledge Assistant (parallel)
 4. `analyst_genie_setup` -- Adds Gold table comments + creates Analyst Genie Space (parallel)
 5. `swarm_setup` -- Provisions swarm infrastructure: UC catalog/schema, mapping tables, threshold controls, baseline seed data, LLM endpoint validation (parallel)
@@ -449,7 +448,7 @@ Job 1 (`PC_Insurance_Agent_Setup`) runs 10 tasks — 8 in parallel + 1 after swa
 7. `toolkit_functions_setup` -- Registers 7 UC toolkit SQL functions in `pc_insurance.metadata` (parallel)
 8. `mcp_app_deploy` -- Deploys MCP app `pc-insurance-workspace-actions` (parallel)
 9. `autonomy_infrastructure_setup` -- Creates autonomy UC artifacts: `dq_validation_results`, `swarm_fix_history`, `health_monitor_log`, `pipeline_health_score` function (after swarm_setup + dq_functions_setup)
-10. `supervisor_agent_setup` -- Creates Supervisor Agent with all 8 tools (after 1-9 complete)
+9. `supervisor_agent_setup` -- Creates Supervisor Agent with all 7 tools (after 1-8 + 10 complete)
 
 Run manually after Phase 1 (UC setup) and Phase 5 Step 1 (DQ functions) are complete:
 
@@ -628,14 +627,13 @@ SELECT pc_insurance.dq.calculate_dq_score(
 
 ## Phase 5: Multi-Agent System Deployment (2-3 hours)
 
-The project includes a **Supervisor Agent** that orchestrates 8 specialized tools (7 subagents + 1 MCP server). This section covers the complete setup from scratch in a new environment.
+The project includes a **Supervisor Agent** that orchestrates 7 specialized tools (6 subagents + 1 MCP server). This section covers the complete setup from scratch in a new environment.
 
 ### Agent Overview
 
 | Agent | Type | Role | Resource |
 |---|---|---|---|
-| **Architect** | Serving Endpoint | Designs Bronze/Silver/Gold schemas, data flow topology | MLflow model `pc_architect_agent` |
-| **Data Engineer** | Serving Endpoint | Generates SDP code, SQL transformations, DQ expectations | MLflow model `pc_data_engineer_agent` |
+| **Architect (Principal Data Architect & Senior Data Engineer)** | Serving Endpoint | Designs Bronze/Silver/Gold schemas, data flow topology, generates SDP code, SQL transformations, DQ expectations | MLflow model `workspace.default.pc_unified_agent` v2 (ChatAgent, streaming enabled), endpoint `pc_insurance_agent` |
 | **P&C Domain Expert** | Knowledge Assistant | Answers insurance domain questions (policies, claims, underwriting) | UC Volume `pc_insurance.reference.pc_domain_docs` |
 | **Analyst** | Genie Space | Queries Gold layer for KPIs (loss ratios, retention, frequency) | Gold tables in `pc_insurance.gold` |
 | **QA Validator** | UC Function | Runs data quality validation checks | UC function `pc_insurance.dq.calculate_dq_score` |
@@ -933,45 +931,35 @@ print("✓ All Gold layer comments added for Genie")
 
 Two agents (Architect and Data Engineer) are deployed as MLflow models with serving endpoints.
 
-#### 4a. Run Architect Agent Notebook
+#### 4. Run Unified Insurance Agent Notebook
 
-Run the notebook `agents/Architect_Agent.py`. This notebook:
-1. Defines the Architect system prompt (Medallion architecture, P&C insurance domain, Databricks best practices)
-2. Creates a `pyfunc` model class and logs it to MLflow experiment `/Users/<your-email>/pc_insurance_agents`
-3. Registers the model as `pc_architect_agent` in the MLflow Model Registry
-4. Creates a serving endpoint named `pc_architect_agent` (Small workload, scale-to-zero enabled)
+Run the notebook `agents/Unified_Insurance_Agent`. This notebook:
+1. Defines the unified system prompt (Medallion architecture + pipeline implementation, P&C insurance domain, Databricks best practices)
+2. Creates a `ChatAgent` model class with `predict` and `predict_stream` methods (streaming support)
+3. Logs it to MLflow experiment `/Users/<your-email>/pc_insurance_agents`
+4. Registers the model as `workspace.default.pc_unified_agent` in Unity Catalog Model Registry
+5. Deploys v2 as serving endpoint `pc_insurance_agent` (Small workload, scale-to-zero enabled, streaming enabled)
 
 **Via UI (if notebook execution fails):**
-1. Go to **Models** → verify `pc_architect_agent` exists
+1. Go to **Models** → verify `workspace.default.pc_unified_agent` exists with v2
 2. Go to **Serving** → **Create Endpoint**
-3. Name: `pc_architect_agent`
-4. Source: `pc_architect_agent` (latest version)
+3. Name: `pc_insurance_agent`
+4. Source: `workspace.default.pc_unified_agent` version 2
 5. Workload: Small, Scale to zero: enabled
 6. Click Create
 
-#### 4b. Run Data Engineer Agent Notebook
-
-Run the notebook `agents/Data_Engineer_Agent.py`. This notebook:
-1. Defines the Data Engineer system prompt (pipeline implementation, code patterns, P&C data sources)
-2. Creates a `pyfunc` model class and logs it to MLflow experiment `/Users/<your-email>/pc_insurance_agents`
-3. Registers the model as `pc_data_engineer_agent` in the MLflow Model Registry
-4. Creates a serving endpoint named `pc_data_engineer_agent` (Small workload, scale-to-zero enabled)
-
-**Via UI (if notebook execution fails):** Follow the same steps as above but use model name `pc_data_engineer_agent` and endpoint name `pc_data_engineer_agent`.
-
-#### 4c. Verify Serving Endpoints
+#### 4b. Verify Serving Endpoint
 
 ```python
 from databricks.sdk import WorkspaceClient
 w = WorkspaceClient()
 
-for ep_name in ["pc_architect_agent", "pc_data_engineer_agent"]:
-    ep = w.serving_endpoints.get(ep_name)
-    print(f"{ep_name}: {ep.state.ready}")
-    # Expected: READY (may take a few minutes to provision)
+ep = w.serving_endpoints.get("pc_insurance_agent")
+print(f"pc_insurance_agent: {ep.state.ready}")
+# Expected: READY (may take a few minutes to provision)
 ```
 
-**⚠️ Endpoint names (`pc_architect_agent`, `pc_data_engineer_agent`) are needed for Step 6.**
+**⚠️ Endpoint name (`pc_insurance_agent`) is needed for Step 6.**
 
 ---
 
@@ -1018,9 +1006,9 @@ The app should be in `RUNNING` state. If the app uses auto-detect for `SQL_WAREH
 
 ---
 
-### Step 6: Create Supervisor Agent with 8 Tools + Anti-Routing Rules (30 minutes)
+### Step 6: Create Supervisor Agent with 7 Tools + Anti-Routing Rules (30 minutes)
 
-The Supervisor Agent is the orchestrator that routes questions to the right specialist. It registers all 8 tools created in Steps 1-5.
+The Supervisor Agent is the orchestrator that routes questions to the right specialist. It registers all 7 tools created in Steps 1-5.
 
 #### 6a. Gather All IDs
 
@@ -1032,8 +1020,7 @@ Before creating the Supervisor Agent, collect all resource IDs from Steps 1-5:
 | `GENIE_SPACE_ANALYST_ID` | Step 3b | UUID from the Analyst Genie Space URL |
 | `GENIE_SPACE_DOCUMENTATION_ID` | Step 3c | UUID from the Documentation Genie Space URL |
 | `GENIE_SPACE_DEVOPS_ID` | Step 3d | Same as Documentation or separate UUID |
-| `ARCHITECT_ENDPOINT` | Step 4a | `pc_architect_agent` (endpoint name) |
-| `DATA_ENGINEER_ENDPOINT` | Step 4b | `pc_data_engineer_agent` (endpoint name) |
+| `UNIFIED_AGENT_ENDPOINT` | Step 4 | `pc_insurance_agent` (endpoint name) |
 | `DQ_FUNCTION` | Step 1 | `pc_insurance.dq.calculate_dq_score` (fully qualified) |
 | `MCP_APP_NAME` | Step 5 | `pc-insurance-workspace-actions` (app name) |
 
@@ -1043,7 +1030,7 @@ Before creating the Supervisor Agent, collect all resource IDs from Steps 1-5:
 1. Go to **Agents** → **Create Agent** → **Supervisor Agent**
 2. Display Name: `P&C Insurance Medallion Architecture Team`
 3. Description: `A multi-agent team that designs, develops, and operates a Medallion architecture for Property & Casualty (P&C) Insurance. Routes questions to the right specialist: Architect for design, Data Engineer for code, Domain Expert for insurance knowledge, Analyst for KPIs, QA for validation, Documentation for docs, DevOps for guidance, and Workspace-Actions for execution.`
-4. Add the 8 tools one by one (see 6c-6j below)
+4. Add the 7 tools one by one (see 6c-6i below)
 5. Set the instructions (see 6k)
 6. Save and wait for the serving endpoint to be READY
 
@@ -1054,16 +1041,10 @@ Run the notebook `agents/Supervisor_Agent_Setup.py`. Update the configuration va
 #### 6c. Register Tool 1: Architect (Serving Endpoint)
 
 - **Tool type:** Serving Endpoint
-- **Endpoint:** `pc_architect_agent`
-- **Description:** `Designs Medallion architecture for P&C insurance. Defines Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, and scalability patterns. Answers questions about architecture design, table schemas, and pipeline topology. DO NOT use for code generation — use Data Engineer for that.`
+- **Endpoint:** `pc_insurance_agent`
+- **Description:** `Principal Data Architect & Senior Data Engineer (merged). Designs Medallion architecture for P&C insurance AND implements pipelines/code. Defines Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, scalability patterns. Also writes Spark Declarative Pipeline (SDP) code, SQL transformations, MERGE statements for SCD2, and data quality expectations. Handles both architecture design AND code generation.`
 
-#### 6d. Register Tool 2: Data Engineer (Serving Endpoint)
-
-- **Tool type:** Serving Endpoint
-- **Endpoint:** `pc_data_engineer_agent`
-- **Description:** `Implements Bronze/Silver/Gold pipelines for P&C insurance data. Writes Spark Declarative Pipeline (SDP) code, SQL transformations, MERGE statements for SCD2, and data quality expectations. DO NOT use for architecture design — use Architect for that.`
-
-#### 6e. Register Tool 3: P&C Domain Expert (Knowledge Assistant)
+#### 6d. Register Tool 2: P&C Domain Expert (Knowledge Assistant)
 
 - **Tool type:** Knowledge Assistant
 - **Knowledge Assistant ID:** `<KNOWLEDGE_ASSISTANT_ID from Step 2c>`

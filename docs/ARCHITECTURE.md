@@ -91,8 +91,7 @@ flowchart TB
 
     subgraph Agents["🤖 Multi-Agent System — Supervisor Orchestrator"]
         SUP["Supervisor Agent<br/>mas-3fcb11f6-endpoint"]
-        ARCH["Architect Agent<br/>pc_architect_agent"]
-        DE["Data Engineer Agent<br/>pc_data_engineer_agent"]
+        ARCH["Unified Agent<br/>pc_insurance_agent"]
         DOM["Domain Expert Agent<br/>Knowledge Assistant (RAG)"]
         ANA["Analyst Agent<br/>Genie Space"]
         DEV["DevOps Agent<br/>Genie Space"]
@@ -281,7 +280,7 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 
 ### 2. Architect Agent
 
-**Role**: Designs data architecture, schemas, and data flow
+**Role**: Principal Data Architect & Senior Data Engineer (merged)
 
 **Responsibilities**:
 - Design Bronze/Silver/Gold layer schemas
@@ -289,23 +288,15 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 - Plan data flow topology
 - Design Unity Catalog governance model
 - Define partitioning and optimization strategies
-
-**Implementation**: `Architect_Agent.py` (serving_endpoint `pc_architect_agent`)
-
-### 3. Data Engineer Agent
-
-**Role**: Implements pipelines, transformations, and data quality checks
-
-**Responsibilities**:
 - Write Spark/SQL transformation code
 - Implement Bronze → Silver → Gold pipelines
 - Create metadata-driven frameworks
 - Implement SCD Type 2 logic
 - Write data quality expectations
 
-**Implementation**: `Data_Engineer_Agent.py` (serving_endpoint `pc_data_engineer_agent`)
+**Implementation**: `Unified_Insurance_Agent.py` (serving_endpoint `pc_insurance_agent`, MLflow model `workspace.default.pc_unified_agent` v2, ChatAgent with streaming support)
 
-### 4. Domain Expert Agent
+### 3. Domain Expert Agent
 
 **Role**: Provides P&C insurance domain knowledge and business context
 
@@ -542,14 +533,13 @@ The project uses 3 jobs with distinct purposes:
 **Run**: Manual (run once after UC setup is complete)
 **Duration**: ~20 minutes
 
-**Execution Pattern**: 8 tasks run in parallel, `autonomy_infrastructure_setup` runs after `swarm_setup` and `dq_functions_setup`, then `supervisor_agent_setup` runs after all 10 tasks complete.
+**Execution Pattern**: 7 tasks run in parallel, `autonomy_infrastructure_setup` runs after `swarm_setup` and `dq_functions_setup`, then `supervisor_agent_setup` runs after all 9 tasks complete.
 
-#### Parallel Tasks (1-8)
+#### Parallel Tasks (1-7)
 
 | # | Task Name | Description | Timeout |
 |---|---|---|---|
-| 1 | `architect_agent` | Registers the Architect Agent as an MLflow pyfunc model, creates serving endpoint `pc_architect_agent` (Small workload, scale-to-zero) | 10 min |
-| 2 | `data_engineer_agent` | Registers the Data Engineer Agent as an MLflow pyfunc model, creates serving endpoint `pc_data_engineer_agent` (Small workload, scale-to-zero) | 10 min |
+| 1 | `architect_agent` | Registers the Unified Insurance Agent as an MLflow ChatAgent model, creates serving endpoint `pc_insurance_agent` (Small workload, scale-to-zero, streaming enabled) | 10 min |
 | 3 | `domain_expert_setup` | Creates UC volume `pc_insurance.reference.pc_domain_docs`, uploads P&C domain documents, creates a Knowledge Assistant (Instructed Retriever) over the volume | 10 min |
 | 4 | `analyst_genie_setup` | Adds column-level comments to all Gold layer tables for Genie, creates Genie Space `PC_Insurance_Analyst` with all 6 Gold tables and example queries | 10 min |
 | 5 | `swarm_setup` | Provisions swarm infrastructure: creates `pc_insurance` catalog + `metadata` schema, creates `mapping_documents` and `threshold_controls` tables, seeds baseline data, validates LLM endpoint availability | 10 min |
@@ -562,7 +552,7 @@ The project uses 3 jobs with distinct purposes:
 
 | # | Task Name | Description | Depends On | Timeout |
 |---|---|---|---|---|
-| 9 | `supervisor_agent_setup` | Creates the Supervisor Agent ("P&C Insurance Medallion Architecture Team") with all 8 tools registered (7 subagents + 1 MCP app), configures anti-routing rules, validates endpoint readiness (ID: `3fcb11f6-0410-4be0-9d04-1e1a351ceb59`, endpoint: `mas-3fcb11f6-endpoint`) | 1-8 + 10 (all must succeed) | 10 min |
+| 9 | `supervisor_agent_setup` | Creates the Supervisor Agent ("P&C Insurance Medallion Architecture Team") with all 7 tools registered (6 subagents + 1 MCP app), configures anti-routing rules, validates endpoint readiness (ID: `fc596f26-066a-464d-94d9-9fc472b027dc`) | 1-7 + 8 + 10 (all must succeed) | 10 min |
 
 **Task Failure Handling**: If any task (1-8 or 10) fails, the Supervisor Agent setup (task 9) is skipped. The `autonomy_infrastructure_setup` task (10) requires `swarm_setup` (5) and `dq_functions_setup` (6) to succeed first. The job can be re-run after fixing the failing task. All tasks are idempotent (safe to re-run).
 

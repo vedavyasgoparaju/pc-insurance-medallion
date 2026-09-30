@@ -191,20 +191,19 @@ The Supervisor Agent is the central orchestrator of the multi-agent system. It h
 
 **How it's used here:**
 
-Two AI agents are registered as MLflow `pyfunc` models:
+A unified AI agent is registered as an MLflow `ChatAgent` model:
 
 | Model | Experiment | Purpose |
 |---|---|---|
-| `pc_architect_agent` | `/Users/.../pc_insurance_agents` | Architecture design agent (Llama 3.3 70B) |
-| `pc_data_engineer_agent` | `/Users/.../pc_insurance_agents` | Pipeline implementation agent |
+| `pc_unified_agent` | `/Users/.../pc_insurance_agents` | Unified Architect & Data Engineer agent (Llama 3.3 70B, streaming supported) |
 
-Each agent:
-1. Extends `mlflow.pyfunc.PythonModel`
-2. Registered via `mlflow.start_run()` + `mlflow.pyfunc.log_model()`
-3. Specifies `DatabricksServingEndpoint` resource dependencies
-4. Deployed as a serving endpoint (scale-to-zero)
+The agent:
+1. Extends `mlflow.pyfunc.ChatAgent` (supports both `predict` and `predict_stream`)
+2. Registered via `mlflow.start_run()` + `mlflow.pyfunc.log_model()` with `ChatAgent` signature
+3. Calls `databricks-meta-llama-3-3-70b-instruct` via `mlflow.deployments` client
+4. Deployed as serving endpoint `pc_insurance_agent` (scale-to-zero, streaming enabled)
 
-**Where configured:** `agents/Architect_Agent.py`, `agents/Data_Engineer_Agent.py` (Job 1 tasks: `architect_agent`, `data_engineer_agent`).
+**Where configured:** `agents/Unified_Insurance_Agent.py` (Job 1 task: `architect_agent`).
 
 ---
 
@@ -216,12 +215,11 @@ Each agent:
 
 | Endpoint | Model | Workload | Scale |
 |---|---|---|---|
-| `pc_architect_agent` | Architect Agent | Small | Scale-to-zero |
-| `pc_data_engineer_agent` | Data Engineer Agent | Small | Scale-to-zero |
+| `pc_insurance_agent` | Unified Architect & Data Engineer Agent | Small | Scale-to-zero, streaming enabled |
 
 Created via `w.serving_endpoints.create()` with `EndpointCoreConfigInput` and `ServedModelInput`. The Supervisor Agent calls these endpoints to route architecture and engineering questions.
 
-**Where configured:** `agents/Architect_Agent.py` (lines 224-243), `agents/Data_Engineer_Agent.py`. DAB variable `supervisor_endpoint` in `databricks.yml`.
+**Where configured:** `agents/Unified_Insurance_Agent.py`. DAB variable `supervisor_endpoint` in `databricks.yml`.
 
 ---
 
@@ -421,15 +419,14 @@ Two jobs with distinct purposes:
 
 | Task | Description |
 |---|---|
-| `architect_agent` | Register MLflow model + create serving endpoint |
-| `data_engineer_agent` | Register MLflow model + create serving endpoint |
+| `architect_agent` | Register unified MLflow ChatAgent model + create serving endpoint `pc_insurance_agent` |
 | `domain_expert_setup` | Create UC volume + upload docs + create Knowledge Assistant |
 | `analyst_genie_setup` | Add Gold table comments + create Genie Space |
 | `swarm_setup` | Provision swarm infrastructure (catalog, schema, tables, volume, seed data) |
 | `dq_functions_setup` | Register 7 DQ SQL functions |
 | `toolkit_functions_setup` | Register 7 toolkit SQL functions |
 | `mcp_app_deploy` | Deploy MCP app `pc-insurance-workspace-actions` |
-| `supervisor_agent_setup` | Create Supervisor Agent with all 8 tools (depends on 1-8) |
+| `supervisor_agent_setup` | Create Supervisor Agent with all 7 tools (depends on 1-7) |
 
 **Job 2 flow:**
 ```
@@ -544,9 +541,9 @@ Implemented via `MERGE INTO` with deduplication (latest record by `ingestion_tim
 | 2 | Delta Lake | Data Platform | All managed tables | N/A (pipelines) |
 | 3 | UC SQL Functions | Data Platform | 7 toolkit + 7 DQ functions | `toolkit_functions_setup`, `dq_functions_setup` |
 | 4 | UC Volumes | Data Platform | `technical_docs`, `pc_domain_docs` | `swarm_setup`, `domain_expert_setup` |
-| 5 | Supervisor Agent | AI & Agents | Endpoint `mas-3fcb11f6-endpoint` | `supervisor_agent_setup` (task 9) |
-| 6 | MLflow | AI & Agents | Models `pc_architect_agent`, `pc_data_engineer_agent` | `architect_agent`, `data_engineer_agent` |
-| 7 | Model Serving | AI & Agents | Endpoints (scale-to-zero) | `architect_agent`, `data_engineer_agent` |
+| 5 | Supervisor Agent | AI & Agents | Endpoint `fc596f26-066a-464d-94d9-9fc472b027dc` | `supervisor_agent_setup` (task 9) |
+| 6 | MLflow | AI & Agents | Model `pc_unified_agent` (ChatAgent, v2) | `architect_agent` |
+| 7 | Model Serving | AI & Agents | Endpoint `pc_insurance_agent` (scale-to-zero, streaming) | `architect_agent` |
 | 8 | Knowledge Assistant | AI & Agents | Domain Expert Agent (RAG) | `domain_expert_setup` |
 | 9 | Genie Spaces | AI & Agents | `PC_Insurance_Analyst`, DevOps Genie | `analyst_genie_setup` |
 | 10 | Databricks Apps (MCP) | AI & Agents | `pc-insurance-workspace-actions` | `mcp_app_deploy` |
