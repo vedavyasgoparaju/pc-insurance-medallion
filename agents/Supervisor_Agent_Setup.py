@@ -11,8 +11,7 @@
 # MAGIC
 # MAGIC | Agent | Role | Skill Level | Type | Description |
 # MAGIC |---|---|---|---|---|
-# MAGIC | Architect | Principal Architect | Expert | Serving Endpoint | Designs Medallion architecture, schemas, data flow |
-# MAGIC | Data Engineer | Senior Data Engineer | Senior | Serving Endpoint | Generates pipeline code, SQL, DQ expectations |
+# MAGIC | Architect | Principal Data Architect & Senior Data Engineer | Expert | Serving Endpoint | Designs Medallion architecture AND implements pipelines/code |
 # MAGIC | Domain Expert | P&C Insurance SME | Senior | Knowledge Assistant | Answers insurance domain questions |
 # MAGIC | Analyst | Business Analyst | Mid | Genie Space | Queries Gold layer for KPIs and business metrics |
 # MAGIC | QA Validator | QA Engineer | Junior | UC Function | Runs data quality validation checks |
@@ -21,9 +20,8 @@
 # MAGIC | Workspace-Actions | MCP Server | N/A | Databricks App | Executes workspace changes: file writes, SQL, git commits |
 # MAGIC
 # MAGIC ## Prerequisites
-# MAGIC 1. Run `Architect_Agent` notebook → creates `pc_architect_agent` serving endpoint
-# MAGIC 2. Run `Data_Engineer_Agent` notebook → creates `pc_data_engineer_agent` serving endpoint
-# MAGIC 3. Run `Domain_Expert_Setup` notebook → creates UC volume `pc_insurance.reference.pc_domain_docs`
+# MAGIC 1. Run `Unified_Insurance_Agent` notebook → creates `pc_insurance_agent` serving endpoint (ChatAgent with streaming)
+# MAGIC 2. Run `Domain_Expert_Setup` notebook → creates UC volume `pc_insurance.reference.pc_domain_docs`
 # MAGIC 4. Run `Analyst_Genie_Setup` notebook → creates Genie Spaces (analyst, documentation, devops)
 # MAGIC 5. UC functions in `pc_insurance.dq` must exist
 # MAGIC 6. MCP app `pc-insurance-workspace-actions` must be running
@@ -32,7 +30,7 @@
 # MAGIC This notebook is idempotent — it checks for an existing Supervisor Agent by display name and only creates if not found. Tools are registered only if not already present. Safe to re-run.
 # MAGIC
 # MAGIC ## Auto-Deploy
-# MAGIC Step 1b checks if the supervisor agent's serving endpoint exists. If the endpoint was deleted, the notebook automatically deletes and recreates the supervisor agent to trigger endpoint creation, then waits for the endpoint to become READY. All 8 tools are re-registered idempotently by Step 2.
+# MAGIC Step 1b checks if the supervisor agent's serving endpoint exists. If the endpoint was deleted, the notebook automatically deletes and recreates the supervisor agent to trigger endpoint creation, then waits for the endpoint to become READY. All 7 tools are re-registered idempotently by Step 2.
 
 # COMMAND ----------
 
@@ -60,41 +58,37 @@ print(f"Auth headers: {list(auth_headers.keys())}")
 # Configuration
 # ============================================
 SUPERVISOR_DISPLAY_NAME = "P&C Insurance Medallion Architecture Team"
-SUPERVISOR_DESCRIPTION = "A multi-agent team that designs, develops, and operates a Medallion architecture for Property & Casualty (P&C) Insurance. Routes questions to the right specialist: Architect for design, Data Engineer for code, Domain Expert for insurance knowledge, Analyst for KPIs, QA for validation, Documentation for technical writing, DevOps for Git/CI-CD guidance, and Workspace-Actions for executing workspace changes."
+SUPERVISOR_DESCRIPTION = "A multi-agent team that designs, develops, and operates a Medallion architecture for Property & Casualty (P&C) Insurance. Routes questions to the right specialist: Architect (unified architecture + code) for design and implementation, Domain Expert for insurance knowledge, Analyst for KPIs, QA for validation, Documentation for technical writing, DevOps for Git/CI-CD guidance, and Workspace-Actions for executing workspace changes."
 
 SUPERVISOR_INSTRUCTIONS = """You are the team lead for a virtual team building a Medallion architecture for a Property & Casualty (P&C) Insurance use case on Databricks.
 
 ## Your Team Members
 
-1. ARCHITECT (Principal Data Architect) - Designs the overall Medallion architecture, defines Bronze/Silver/Gold layer schemas, data flow topology, and Unity Catalog governance. Route architecture and design questions here. DO NOT route implementation, KPI, or Git questions here.
+1. ARCHITECT (Principal Data Architect & Senior Data Engineer) - Designs the overall Medallion architecture AND implements pipelines/code. Defines Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog governance, writes SDP code, SQL transformations, and data quality expectations. Route both architecture design AND code generation questions here. DO NOT route KPI or Git questions here.
 
-2. DATA ENGINEER (Senior Data Engineer) - Implements Bronze/Silver/Gold pipelines, writes Spark Declarative Pipeline (SDP) code, SQL transformations, and data quality expectations. Route code generation and pipeline implementation questions here. DO NOT route architecture design, business KPI queries, or Git operations here.
+2. P&C DOMAIN EXPERT (Insurance SME) - Answers questions about P&C insurance domain: policy lifecycle, claims processing, underwriting, reserving, loss ratios, combined ratios, frequency/severity, retention, and regulatory requirements. Route insurance domain questions here. DO NOT route KPI queries, code generation, or Git operations here.
 
-3. P&C DOMAIN EXPERT (Insurance SME) - Answers questions about P&C insurance domain: policy lifecycle, claims processing, underwriting, reserving, loss ratios, combined ratios, frequency/severity, retention, and regulatory requirements. Route insurance domain questions here. DO NOT route KPI queries, code generation, or Git operations here.
+3. ANALYST (Business Analyst) - Answers business questions by querying Gold layer tables: loss ratios, combined ratios, claim frequency/severity, retention rates, premium growth, exposure summaries. Route KPI and business metric questions here. DO NOT route architecture, code generation, Git operations, or documentation requests here.
 
-4. ANALYST (Business Analyst) - Answers business questions by querying Gold layer tables: loss ratios, combined ratios, claim frequency/severity, retention rates, premium growth, exposure summaries. Route KPI and business metric questions here. DO NOT route architecture, code generation, Git operations, or documentation requests here.
+4. QA VALIDATOR (QA Engineer) - Runs data quality validation checks on the data by calling the pc_insurance.dq.calculate_dq_score UC function. Validates premium amounts, claim statuses, policy existence, and loss ratios. Route data quality and validation questions here. DO NOT route architecture, code generation, or Git questions here.
 
-5. QA VALIDATOR (QA Engineer) - Runs data quality validation checks on the data by calling the pc_insurance.dq.calculate_dq_score UC function. Validates premium amounts, claim statuses, policy existence, and loss ratios. Route data quality and validation questions here. DO NOT route architecture, code generation, or Git questions here.
+5. DOCUMENTATION (Technical Writer) - Generates and updates technical documentation for the P&C Insurance Medallion architecture: README files, architecture guides, data dictionaries, pipeline documentation. Route documentation requests here. DO NOT route KPI queries, code generation, or Git operations here.
 
-6. DOCUMENTATION (Technical Writer) - Generates and updates technical documentation for the P&C Insurance Medallion architecture: README files, architecture guides, data dictionaries, pipeline documentation. Route documentation requests here. DO NOT route KPI queries, code generation, or Git operations here.
+6. DEVOPS (DevOps Engineer) - Provides GUIDANCE on Git operations, CI/CD, branch management, and DAB deployment for the P&C Insurance Medallion project. Advises on best practices for version control and deployment. Route Git and CI/CD guidance questions here. DO NOT route KPI queries, business metrics, architecture design, code generation, or documentation requests here. DEVOPS provides GUIDANCE ONLY -- it cannot execute Git operations.
 
-7. DEVOPS (DevOps Engineer) - Provides GUIDANCE on Git operations, CI/CD, branch management, and DAB deployment for the P&C Insurance Medallion project. Advises on best practices for version control and deployment. Route Git and CI/CD guidance questions here. DO NOT route KPI queries, business metrics, architecture design, code generation, or documentation requests here. DEVOPS provides GUIDANCE ONLY -- it cannot execute Git operations.
-
-8. WORKSPACE-ACTIONS (MCP Server) - EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, triggers Databricks Jobs (Job 820361677269451 for agent setup, Job 894776717783668 for data pipeline with load_type INITIAL or INCREMENTAL), checks job run status, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, including triggering data pipelines or retraining agents, not just get guidance.
+7. WORKSPACE-ACTIONS (MCP Server) - EXECUTES approved workspace actions for the P&C Insurance project: writes/updates notebooks and files, runs notebooks, executes SQL statements, triggers Databricks Jobs (Job 820361677269451 for agent setup, Job 894776717783668 for data pipeline with load_type INITIAL or INCREMENTAL), checks job run status, and performs git commit/push operations. Route execution requests here when the user wants to actually perform an action, including triggering data pipelines or retraining agents, not just get guidance.
 
 ## Anti-Routing Rules (HARD BOUNDARIES)
 
 1. DO NOT route KPI or business metric questions to DEVOPS. DevOps is for Git/CI-CD guidance only.
 2. DO NOT route KPI or business metric questions to DOCUMENTATION. Documentation is for technical writing only.
 3. DO NOT route Git execution requests to DEVOPS. Use WORKSPACE-ACTIONS for actual git commit/push. DEVOPS is guidance only.
-4. DO NOT route architecture design questions to DATA ENGINEER. Data Engineer implements code; Architect designs.
-5. DO NOT route code implementation questions to ARCHITECT. Architect designs; Data Engineer implements.
-6. DO NOT route insurance domain definition questions to ANALYST. Domain Expert explains concepts; Analyst queries actual metric values from Gold tables.
+4. DO NOT route insurance domain definition questions to ANALYST. Domain Expert explains concepts; Analyst queries actual metric values from Gold tables.
 
 ## Routing Rules
 
 - Architecture and design questions -> ARCHITECT
-- Code and pipeline questions -> DATA ENGINEER
+- Code and pipeline questions -> ARCHITECT (merged with architecture)
 - Insurance domain questions -> P&C DOMAIN EXPERT
 - KPI and business questions -> ANALYST
 - Data quality questions -> QA VALIDATOR
@@ -115,11 +109,8 @@ SUPERVISOR_INSTRUCTIONS = """You are the team lead for a virtual team building a
 # Tool configuration: (tool_id, tool_type, spec_dict, description)
 TOOLS_CONFIG = [
     ("architect", "serving_endpoint",
-     {"serving_endpoint": {"name": "pc_architect_agent"}},
-     "Designs the overall Medallion architecture for P&C insurance: Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, and scalability patterns. DO NOT route code implementation, KPI queries, or Git operations here."),
-    ("data-engineer", "serving_endpoint",
-     {"serving_endpoint": {"name": "pc_data_engineer_agent"}},
-     "Implements Bronze/Silver/Gold pipelines for P&C insurance: writes SDP code, SQL transformations, MERGE statements for SCD2, and data quality expectations. DO NOT route architecture design, KPI queries, or Git operations here."),
+     {"serving_endpoint": {"name": "pc_insurance_agent"}},
+     "Principal Data Architect & Senior Data Engineer (merged). Designs Medallion architecture AND implements pipelines for P&C insurance: Bronze/Silver/Gold layer schemas, data flow topology, Unity Catalog structure, governance policies, SCD2 strategies, scalability patterns, SDP code, SQL transformations, MERGE statements, and data quality expectations. DO NOT route KPI queries or Git operations here."),
     ("pc-domain-expert", "volume",
      {"volume": {"name": "pc_insurance.reference.pc_domain_docs"}},
      "Answers P&C insurance domain questions: policy lifecycle, claims processing, underwriting, reserving, loss ratios, combined ratios, frequency/severity, retention, and regulatory requirements. DO NOT route KPI queries, code generation, or Git operations here."),
