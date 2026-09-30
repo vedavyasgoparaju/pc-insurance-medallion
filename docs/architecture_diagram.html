@@ -17,11 +17,10 @@ h1 { text-align: center; font-size: 22px; margin-bottom: 4px; color: #16213e; }
 .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #ccc; }
 .diagram-container { display: flex; justify-content: center; overflow: visible; }
 svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: visible; }
-.comp { cursor: pointer; transition: opacity 0.15s; position: relative; }
+.comp { cursor: pointer; transition: opacity 0.15s; }
 .comp:hover rect, .comp:hover path { stroke-width: 3; filter: brightness(1.08); }
-.comp:hover { z-index: 1000; }
 .comp:hover .tooltip { opacity: 1; visibility: visible; }
-.tooltip { opacity: 0; visibility: hidden; transition: opacity 0.2s; pointer-events: none; z-index: 1001; position: relative; }
+.tooltip { opacity: 0; visibility: hidden; transition: opacity 0.2s; pointer-events: none; }
 .tooltip-box { fill: #1a1a2e; rx: 6; stroke: #4a4a6a; stroke-width: 1; }
 .tooltip-title { fill: #fff; font-size: 12px; font-weight: bold; }
 .tooltip-text { fill: #d0d0e0; font-size: 11px; }
@@ -181,5 +180,19 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 </svg>
 </div>
+<script>
+// Fix tooltip z-index: move hovered component to end of SVG (paints last)
+document.addEventListener('DOMContentLoaded', function() {
+    const svg = document.querySelector('svg');
+    const components = document.querySelectorAll('.comp');
+    
+    components.forEach(comp => {
+        comp.addEventListener('mouseenter', function() {
+            // Move this element to the end of the SVG
+            svg.appendChild(comp);
+        });
+    });
+});
+</script>
 </body>
 </html>
