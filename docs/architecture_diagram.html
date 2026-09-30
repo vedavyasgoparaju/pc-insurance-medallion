@@ -180,19 +180,5 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 </svg>
 </div>
-<script>
-// Fix tooltip z-index: move hovered component to end of SVG (paints last)
-document.addEventListener('DOMContentLoaded', function() {
-    const svg = document.querySelector('svg');
-    const components = document.querySelectorAll('.comp');
-    
-    components.forEach(comp => {
-        comp.addEventListener('mouseenter', function() {
-            // Move this element to the end of the SVG
-            svg.appendChild(comp);
-        });
-    });
-});
-</script>
 </body>
 </html>
