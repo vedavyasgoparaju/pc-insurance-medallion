@@ -99,7 +99,7 @@ flowchart TB
         MCP["Workspace-Actions<br/>MCP App (git, files, SQL)"]
     end
 
-    SUP --> ARCH & DE & DOM & ANA & DEV & QA & MCP
+    SUP --> ARCH & DOM & ANA & DEV & QA & MCP
 
     subgraph Swarm["🔄 Autonomous Agent Swarm — LangGraph Self-Healing"]
         SW1["Supervisor<br/>(Llama 3.3 70B)"]
@@ -278,7 +278,7 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 **Endpoint**: `mas-fc596f26-endpoint` (READY)
 **Agent ID**: `fc596f26-066a-464d-94d9-9fc472b027dc`
 
-### 2. Architect Agent
+### 2. Unified Agent
 
 **Role**: Principal Data Architect & Senior Data Engineer (merged)
 
@@ -363,10 +363,9 @@ The platform uses a **multi-agent architecture** where specialized AI agents han
 
 1. KPI questions → **Analyst only** (never DevOps or Documentation)
 2. Git execution → **Workspace-Actions** (DevOps is guidance only)
-3. Architecture design → **Architect** (not Data Engineer)
-4. Code implementation → **Data Engineer** (not Architect)
-5. Domain definitions → **Domain Expert** (not Analyst)
-6. DevOps → **Guidance only** (cannot execute Git operations)
+3. Architecture design AND code implementation → **Unified Agent** (not DevOps, not Analyst)
+4. Domain definitions → **Domain Expert** (not Analyst)
+5. DevOps → **Guidance only** (cannot execute Git operations)
 
 ---
 
@@ -435,7 +434,7 @@ The unified agent (`pc_insurance_agent`) is implemented as a subclass of `mlflow
 
 ### 2. End-to-End Design-to-Code in a Single Conversation
 
-The merged Architect agent (Principal Data Architect & Senior Data Engineer) eliminates the handoff between design and implementation that previously required routing between two separate agents. In a single conversation:
+The Unified Agent (Principal Data Architect & Senior Data Engineer) eliminates the handoff between design and implementation that previously required routing between two separate agents. In a single conversation:
 
 1. **Design phase**: The agent designs Bronze/Silver/Gold schemas, defines UC governance, plans data flow topology
 2. **Implementation phase**: The same agent writes SDP code, SQL transformations, MERGE statements for SCD2, and DQ expectations — using the exact schemas it just designed
