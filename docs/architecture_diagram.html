@@ -15,12 +15,13 @@ h1 { text-align: center; font-size: 22px; margin-bottom: 4px; color: #16213e; }
 .legend { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
 .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #ccc; }
-.diagram-container { display: flex; justify-content: center; overflow-x: auto; }
-svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; }
-.comp { cursor: pointer; transition: opacity 0.15s; }
+.diagram-container { display: flex; justify-content: center; overflow: visible; }
+svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: visible; }
+.comp { cursor: pointer; transition: opacity 0.15s; position: relative; }
 .comp:hover rect, .comp:hover path { stroke-width: 3; filter: brightness(1.08); }
+.comp:hover { z-index: 1000; }
 .comp:hover .tooltip { opacity: 1; visibility: visible; }
-.tooltip { opacity: 0; visibility: hidden; transition: opacity 0.2s; pointer-events: none; }
+.tooltip { opacity: 0; visibility: hidden; transition: opacity 0.2s; pointer-events: none; z-index: 1001; position: relative; }
 .tooltip-box { fill: #1a1a2e; rx: 6; stroke: #4a4a6a; stroke-width: 1; }
 .tooltip-title { fill: #fff; font-size: 12px; font-weight: bold; }
 .tooltip-text { fill: #d0d0e0; font-size: 11px; }
