@@ -1,7 +1,7 @@
 # P&C Insurance Medallion Architecture
 
-**Version:** 4.1  
-**Last Updated:** 2026-09-29  
+**Version:** 5.0  
+**Last Updated:** 2026-10-03  
 **Repository:** `vedavyasgoparaju/pc-insurance-medallion`  
 **Workspace:** `https://dbc-ec4d2e3d-58c3.cloud.databricks.com`
 
@@ -81,9 +81,9 @@ flowchart TB
         end
     end
 
-    SRC -->|"Bronze_Pipeline.py"| Bronze
-    Bronze -->|"Silver_Pipeline_Metadata.py"| Silver
-    Silver -->|"Gold_Pipeline.py"| Gold
+    SRC -->|"SDP: Auto Loader"| Bronze
+    Bronze -->|"SDP: Auto CDC SCD2/SCD1"| Silver
+    Silver -->|"SDP: Materialized Views"| Gold
     Ref -.->|"config"| Silver
     Ref -.->|"config"| Gold
     DQ -.->|"validates"| Silver
@@ -103,11 +103,11 @@ flowchart TB
 
     subgraph Swarm["🔄 Autonomous Agent Swarm — LangGraph Self-Healing"]
         SW1["Supervisor<br/>(Llama 3.3 70B)"]
-        SW2["Triage<br/>jobs.get_run()"]
+        SW2["Triage<br/>pipelines.list_events()"]
         SW3["Business Analyst<br/>mapping_documents"]
         SW4["Data Engineer<br/>toolkit functions"]
         SW5["QA<br/>calculate_dq_score"]
-        SW6["Deployment<br/>jobs.repair_run()"]
+        SW6["Deployment<br/>pipelines.start_update()"]
         SW1 --> SW2 --> SW3 --> SW4 --> SW5 --> SW6
         SW7["RollbackManager<br/>Delta RESTORE"]
         SW8["DependencyChecker<br/>UC lineage check"]
@@ -122,15 +122,13 @@ flowchart TB
 
     subgraph Jobs["⚙️ Job Orchestration"]
         J1["Job 1: Agent Setup (run once)<br/>9 parallel tasks + 1 dependent<br/>~20 min"]
-        J2["Job 2: Data Pipeline<br/>Bronze→Silver→Gold→Swarm<br/>load_type: INITIAL | INCREMENTAL"]
+        J2["Job 2: SDP Pipeline + Swarm<br/>sdp_pipeline task → autonomous_swarm<br/>pipeline_id: 1069f9f6..."]
         J3["Job 3: Health Monitor (every 6h)<br/>Table freshness · DQ pass rate<br/>Swarm success · health_score"]
     end
 
     J1 -->|"deploys"| Agents
     J1 -->|"provisions"| Swarm
-    J2 -->|"runs"| Bronze
-    J2 -->|"runs"| Silver
-    J2 -->|"runs"| Gold
+    J2 -->|"runs"| UC
     J2 -.->|"on failure"| Swarm
 
     subgraph Consumption["📊 Consumption Layer"]
@@ -167,7 +165,7 @@ flowchart TB
 - Partitioned by ingestion date
 - Delta Lake format
 
-**Implementation**: `pipelines/Bronze_Pipeline.py`
+**Implementation**: SDP pipeline `transformations/bronze/` (Auto Loader with `recursiveFileLookup => false`)
 
 ### Silver Layer (Cleansed & Conformed)
 
@@ -186,14 +184,14 @@ flowchart TB
 
 **Characteristics**:
 - **Metadata-Driven**: Transformations driven by `silver_transformation_config`
-- **SCD Type 2**: `is_current`, `effective_from`, `effective_to` tracking
+- **SCD Type 2**: `__START_AT`/`__END_AT` tracking (Auto CDC)
 - **Data Cleansing**: Standardization, null handling, type conversion
 - **PII Masking**: Customer names masked
 - **Deduplication**: Latest record based on ingestion timestamp
-- **Audit Logging**: Every run logged in `silver_load_audit`
-- **Reconciliation**: Source vs target counts in `silver_reconciliation`
+- **Audit Logging**: SDP pipeline update events
+- **Reconciliation**: Source vs target counts validated post-load
 
-**Implementation**: `pipelines/Silver_Pipeline_Metadata.py`
+**Implementation**: SDP pipeline `transformations/silver/` (Auto CDC for SCD2/SCD1, streaming tables for facts, MV for date_dim)
 
 ### Gold Layer (Business KPIs)
 
@@ -214,7 +212,7 @@ flowchart TB
 - **Audit Logging**: Every refresh logged in `gold_load_audit`
 - **Data Quality Scores**: DQ metrics tracked per refresh
 
-**Implementation**: `pipelines/Gold_Pipeline.py`
+**Implementation**: SDP pipeline `transformations/gold/` (6 materialized views, auto-incremental refresh)
 
 ---
 

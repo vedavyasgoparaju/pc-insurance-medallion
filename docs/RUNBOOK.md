@@ -101,7 +101,7 @@ for run in runs:
     print("-" * 80)
 ```
 
-> **For pipeline execution commands, see [DEPLOYMENT.md](DEPLOYMENT.md) > Running the Pipelines.**
+> **For pipeline execution commands, see [DEPLOYMENT.md](DEPLOYMENT.md) > SDP Pipeline Deployment.**
 
 ### Health Monitor Job (Job 3)
 
@@ -145,9 +145,7 @@ LIMIT 10;
 ### Key Metrics to Monitor
 
 1. **Pipeline Execution Time**
-   - Bronze: < 30 minutes
-   - Silver: < 60 minutes
-   - Gold: < 30 minutes
+   - SDP pipeline (Bronze → Silver → Gold): < 45 minutes total
 
 2. **Data Quality Score**
    - Target: > 95%
@@ -260,7 +258,7 @@ LIMIT 10;
 
 **Resolution Steps**:
 1. Check error message in audit table
-2. Review notebook execution logs in Databricks UI
+2. Review SDP pipeline event logs in Databricks UI (pipeline → updates → events)
 3. Verify source data availability
 4. Check for schema changes
 5. Validate Unity Catalog permissions

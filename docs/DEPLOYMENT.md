@@ -179,11 +179,15 @@ The MCP app (`pc-insurance-workspace-actions`) runs as a service principal and n
 
 ```
 pc-insurance-medallion/
-├── pipelines/
-│   ├── Bronze_Pipeline.py          # Data generation & ingestion (5 Bronze tables)
-│   ├── Silver_Pipeline_Metadata.py # SCD2, PII masking, DQ checks (7 Silver tables)
-│   ├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
-│   └── Orchestrator.py             # Master pipeline orchestrator
+├── transformations/
+│   ├── bronze/                    # SDP Bronze SQL (Auto Loader, 5 raw tables)
+│   ├── silver/                    # SDP Silver SQL (Auto CDC SCD2/SCD1, facts, MVs)
+│   └── gold/                      # SDP Gold SQL (6 materialized view KPIs)
+├── pipelines/                     # Legacy notebook pipelines (superseded by SDP)
+│   ├── Bronze_Pipeline.py          # [LEGACY] Replaced by SDP Bronze
+│   ├── Silver_Pipeline_Metadata.py # [LEGACY] Replaced by SDP Silver
+│   ├── Gold_Pipeline.py            # [LEGACY] Replaced by SDP Gold
+│   └── Orchestrator.py             # [LEGACY] Replaced by SDP pipeline job task
 ├── agents/
 │   ├── Unified_Insurance_Agent.py   # Unified ChatAgent (architecture + pipeline code, streaming)
 │   ├── Architect_Agent.py           # DEPRECATED — superseded by Unified_Insurance_Agent
@@ -333,7 +337,7 @@ ORDER BY execution_order;
 -- Expected: 6 active metrics
 ```
 
-**Note on Silver table DDL:** Silver layer tables are created dynamically by `pipelines/Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table; it does not contain static Silver table DDL.
+**Note on Silver table DDL:** Silver layer tables are created by the SDP pipeline's Auto CDC transformations (SCD2/SCD1) and streaming fact tables defined in `transformations/silver/`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table for reference; the SDP pipeline reads from Bronze and writes Silver via native Auto CDC.
 
 ### Phase 2: Agent Setup (20 minutes)
 
@@ -366,63 +370,57 @@ result = dbutils.notebook.run(
 print(result)
 ```
 
-### Phase 3: Pipeline Deployment (30 minutes)
+### Phase 3: SDP Pipeline Deployment (5 minutes)
 
-#### Step 3.1: Run Bronze Pipeline
+The entire Bronze → Silver → Gold pipeline is now a single Lakeflow Spark Declarative Pipeline (SDP). No need to run individual notebook pipelines.
 
-```python
-result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/pipelines/Bronze_Pipeline",
-  timeout_seconds=1800
-)
-print(f"Bronze Pipeline Result: {result}")
+#### Step 3.1: Run the SDP Pipeline Job
+
+```bash
+# Trigger the SDP pipeline via the wrapper job
+databricks jobs run-now 894776717783668
 ```
 
-**Validation**:
+The job has 2 tasks:
+1. `sdp_pipeline` — triggers `PC_Insurance_Medallion_SDP` (pipeline_id: 1069f9f6-16b6-4d76-8603-77e64d4ed9f6) which handles Bronze (Auto Loader), Silver (Auto CDC SCD2/SCD1 + streaming facts), and Gold (materialized views) in a single pipeline update.
+2. `autonomous_swarm` — triggered on pipeline failure (`run_if=AT_LEAST_ONE_FAILED`) for self-healing.
+
+Alternatively, trigger the pipeline directly:
+```python
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+w.pipelines.start_update(pipeline_id="1069f9f6-16b6-4d76-8603-77e64d4ed9f6")
+```
+
+#### Step 3.2: Validate Bronze Layer
+
 ```sql
 SELECT 'policies_raw' AS table_name, COUNT(*) AS row_count
 FROM pc_insurance.bronze.policies_raw
 UNION ALL
 SELECT 'claims_raw', COUNT(*) FROM pc_insurance.bronze.claims_raw;
--- Expected: ~1000 policies, ~300 claims
+-- Expected: 1000 policies, 300 claims
 ```
 
-#### Step 3.2: Run Silver Pipeline
+#### Step 3.3: Validate Silver Layer
 
-```python
-result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/pipelines/Silver_Pipeline_Metadata",
-  timeout_seconds=3600
-)
-print(f"Silver Pipeline Result: {result}")
-```
-
-**Validation**:
 ```sql
 SELECT 'policy_dim' AS table_name, COUNT(*) AS row_count
-FROM pc_insurance.silver.policy_dim WHERE is_current = TRUE;
+FROM pc_insurance.silver.policy_dim WHERE __END_AT IS NULL;
+-- Expected: 1000 current policy records
 
-SELECT transformation_id, status, execution_time_seconds
-FROM pc_insurance.reference.silver_load_audit
-ORDER BY run_timestamp DESC LIMIT 10;
--- All should have status = 'SUCCESS'
+-- Check SCD2 columns
+DESCRIBE TABLE pc_insurance.silver.policy_dim;
+-- Should have __START_AT and __END_AT columns
 ```
 
-#### Step 3.3: Run Gold Pipeline
+#### Step 3.4: Validate Gold Layer
 
-```python
-result = dbutils.notebook.run(
-  "/Repos/your-username/pc-insurance-medallion/pipelines/Gold_Pipeline",
-  timeout_seconds=1800
-)
-print(f"Gold Pipeline Result: {result}")
-```
-
-**Validation**:
 ```sql
 SELECT line_of_business, loss_ratio, claim_count
 FROM pc_insurance.gold.loss_ratio_by_lob
 ORDER BY loss_ratio DESC;
+-- Expected: 16 rows (4 LOBs × 4 quarters)
 ```
 
 ### Phase 4: Job Orchestration Setup (20 minutes)

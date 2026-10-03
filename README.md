@@ -12,7 +12,7 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 - **Auto Loader** for scalable CSV ingestion from UC Volume (Bronze)
 - **SCD2, FACT, and DEDUP transformation types** with PII masking (Silver)
 - **Gold metric configuration** defining KPI sources, dimensions, formulas, grain, and refresh order
-- **Both INITIAL and INCREMENTAL load** patterns supported
+- **SDP pipeline** (Lakeflow Spark Declarative Pipelines) replaces all notebook-based Bronze/Silver/Gold tasks — single pipeline manages the full medallion DAG
 
 ## Recent Changes (2026-09-29) — Self-Healing Architecture
 
@@ -60,7 +60,7 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 ### Repository Restructuring (2026-09-25)
 - **New folder hierarchy**: `pipelines/`, `agents/`, `app/`, `execution/`, `utils/`, `sql/`, `docs/`, `swarm/`
 - **Removed:** `Silver_Pipeline.py` (obsolete), `Git_Automation.py` (replaced by MCP app), `CLEANUP_SUMMARY.md`, `CLEANUP_FINAL_REPORT.txt`, `tools/`, `resources/`, `.vscode/`, `InsuranceModel_Architecture_Guide.pdf`
-- **Active:** `Silver_Pipeline_Metadata.py` (metadata-driven framework)
+- **Active:** SDP pipeline `PC_Insurance_Medallion_SDP` (pipeline_id: 1069f9f6-16b6-4d76-8603-77e64d4ed9f6) — replaces all notebook-based pipeline tasks
 - **MCP App:** `app/app.py` — `pc-insurance-workspace-actions` handles git commits, file writes, and SQL execution via subprocess git CLI
 
 ## Architecture
@@ -73,7 +73,7 @@ Bronze, Silver, and Gold layers now use a **metadata-driven approach** with:
 
 | Table | Rows | Source System |
 |-------|------|---------------|
-| policies_raw | 100 | policy_admin_system |
+| policies_raw | 1,000 | policy_admin_system |
 | claims_raw | 300 | claims_system |
 | premiums_raw | 1,200 | billing_system |
 | customers_raw | 500 | crm |
@@ -97,12 +97,12 @@ All Bronze tables have `source_system` and `ingestion_timestamp` metadata column
 
 | Table | Rows | KPIs |
 |-------|------|------|
-| loss_ratio_by_lob | 24 | Loss ratio, expense ratio, combined ratio |
-| claim_frequency_severity | 120 | Frequency, severity by LOB and state |
-| retention_by_agent | 198 | Retention rate, new business growth |
-| premium_growth | 24 | Written/earned premium, growth rate |
-| exposure_summary | 82 | Active policies, coverage limits |
-| uw_dashboard_summary | 24 | Executive dashboard (all KPIs) |
+| loss_ratio_by_lob | 16 | Loss ratio, expense ratio, combined ratio |
+| claim_frequency_severity | 80 | Frequency, severity by LOB and state |
+| retention_by_agent | 199 | Retention rate, new business growth |
+| premium_growth | 16 | Written/earned premium, growth rate |
+| exposure_summary | 80 | Active policies, coverage limits |
+| uw_dashboard_summary | 16 | Executive dashboard (all KPIs) |
 
 Gold outputs are selected from active rows in `gold_metric_config`; the pipeline
 does not create a new hardcoded output path for each metric.
@@ -136,11 +136,15 @@ Supervisor Agent: "P&C Insurance Medallion Architecture Team" with 7 tools (6 su
 
 ```
 pc-insurance-medallion/
-├── pipelines/
-│   ├── Bronze_Pipeline.py          # Data generation & ingestion (5 Bronze tables)
-│   ├── Silver_Pipeline_Metadata.py # SCD2, PII masking, DQ checks (7 Silver tables)
-│   ├── Gold_Pipeline.py            # KPI aggregations (6 Gold tables)
-│   └── Orchestrator.py             # Master pipeline orchestrator
+├── transformations/
+│   ├── bronze/                    # SDP Bronze SQL (Auto Loader, 5 raw tables)
+│   ├── silver/                    # SDP Silver SQL (Auto CDC SCD2/SCD1, facts, MVs)
+│   └── gold/                      # SDP Gold SQL (6 materialized view KPIs)
+├── pipelines/                     # Legacy notebook pipelines (superseded by SDP)
+│   ├── Bronze_Pipeline.py          # [LEGACY] Replaced by SDP Bronze
+│   ├── Silver_Pipeline_Metadata.py # [LEGACY] Replaced by SDP Silver
+│   ├── Gold_Pipeline.py            # [LEGACY] Replaced by SDP Gold
+│   └── Orchestrator.py             # [LEGACY] Replaced by SDP pipeline job task
 ├── agents/
 │   ├── Unified_Insurance_Agent.py   # Unified ChatAgent (architecture + pipeline code, streaming)
 │   ├── Architect_Agent.py           # DEPRECATED — superseded by Unified_Insurance_Agent
@@ -194,7 +198,7 @@ pc-insurance-medallion/
 - `sql/04_gold_tables.sql` - Gold table DDL
 - `sql/05_gold_metric_config.sql` - Gold metric configuration
 
-**Note on Silver table DDL:** Silver layer tables are created dynamically by `pipelines/Silver_Pipeline_Metadata.py` based on the configuration in `silver_transformation_config`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table; it does not contain static Silver table DDL.
+**Note on Silver table DDL:** Silver layer tables are created by the SDP pipeline's Auto CDC transformations (SCD2/SCD1) and streaming fact tables defined in `transformations/silver/`. The `sql/03_silver_transformation_config.sql` script populates the metadata config table for reference; the SDP pipeline reads from Bronze and writes Silver via native Auto CDC.
 
 ## KPI Formulas
 
@@ -210,12 +214,12 @@ pc-insurance-medallion/
 2. **Create Bronze Tables**: Run `sql/02_bronze_tables.sql`
 3. **Configure Silver Transformations**: Run `sql/03_silver_transformation_config.sql`
 4. **Create Gold Tables**: Run `sql/04_gold_tables.sql` and `sql/05_gold_metric_config.sql`
-5. **Run Data Pipeline Job** (initial load):
+5. **Run SDP Pipeline Job** (Bronze → Silver → Gold in one pipeline update):
    ```bash
-   databricks jobs run-now 894776717783668 --json '{"job_parameters":{"load_type":"INITIAL"}}'
+   databricks jobs run-now 894776717783668
    ```
-   Or run notebooks individually: Bronze (`load_type=INITIAL`) -> Silver (`load_type=INITIAL`) -> Gold
-6. **For incremental loads** (default): `databricks jobs run-now 894776717783668`
+   The job triggers the SDP pipeline (`PC_Insurance_Medallion_SDP`) which handles all three medallion layers in a single pipeline update. On failure, the autonomous swarm is triggered for self-healing.
+6. **For full refresh** (rare): Trigger the pipeline with full refresh via the Databricks UI or SDK
 7. **Run Agent Setup Job** (9 tasks — all agents, DQ functions, toolkit functions, MCP app, Supervisor Agent):
    ```bash
    databricks jobs run-now 820361677269451
