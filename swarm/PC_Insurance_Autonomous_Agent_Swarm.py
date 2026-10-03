@@ -34,7 +34,7 @@
 # MAGIC
 # MAGIC 1. **Plan** — Supervisor reads alerts, Triage fetches error context
 # MAGIC 2. **Execute** — BA updates mapping metadata, Data Engineer applies changes to UC
-# MAGIC 3. **Verify** — QA validates DQ via DLT expectations / Great Expectations in sandbox
+# MAGIC 3. **Verify** — QA validates DQ via SDP expectations / Great Expectations in sandbox
 # MAGIC 4. **Deploy** — Deployment Agent triggers repair, commits to Git, writes docs
 # MAGIC
 # MAGIC ### Key Design Principles
@@ -108,6 +108,10 @@ METADATA_CATALOG    = "pc_insurance"
 METADATA_SCHEMA     = "metadata"
 CATALOG        = "pc_insurance"
 SANDBOX_CATALOG_PREFIX = "dev_sandbox_"
+
+# SDP Pipeline configuration (replaces old notebook-based Bronze/Silver/Gold pipeline)
+SDP_PIPELINE_ID    = "1069f9f6-16b6-4d76-8603-77e64d4ed9f6"
+SDP_PIPELINE_JOB_ID = 894776717783668
 
 # Documentation volume path (UC Volume)
 DOCS_VOLUME_PATH = "/Volumes/pc_insurance/metadata/technical_docs"
@@ -461,7 +465,7 @@ class SwarmState(TypedDict, total=False):
     metadata_update_applied: bool        # Flag: has the metadata table been updated?
 
     # ── QA / Validation ──
-    validation_results: Dict[str, Any]   # DLT expectation results
+    validation_results: Dict[str, Any]   # SDP expectation results
     validation_passed: bool              # True if sandbox QA passed
     sandbox_catalog: str                 # Name of the sandbox catalog
     sandbox_run_id: str                   # Databricks run ID in sandbox
@@ -563,12 +567,12 @@ def get_pipeline_error_log(run_id: str) -> dict:
     Fetches the error trace and output logs for a Databricks job run.
 
     For multi-task jobs, iterates over all task run IDs and collects the first
-    failed task's error output. Also fetches DLT event logs if the task is
-    a pipeline (DLT/SDP) task.
+    failed task's error output. Also fetches SDP pipeline event logs if the
+    task is a pipeline (SDP) task.
 
     Returns:
         dict with keys: run_id, state, error_message, error_trace,
-                        failed_task, task_run_id, dlt_events (optional)
+                        failed_task, task_run_id, sdp_events (optional)
     """
     # 1. Get the parent run details
     run_info = _w.jobs.get_run(run_id=int(run_id))
@@ -581,7 +585,7 @@ def get_pipeline_error_log(run_id: str) -> dict:
         "error_trace": "",
         "failed_task": "",
         "task_run_id": "",
-        "dlt_events": []
+        "sdp_events": []
     }
 
     # 2. For multi-task jobs, find the failed task
@@ -610,24 +614,38 @@ def get_pipeline_error_log(run_id: str) -> dict:
         except Exception as e:
             result["error_message"] = f"Failed to fetch run output: {e}"
 
-        # 4. If this is a DLT/SDP pipeline task, fetch update event logs
+        # 4. If this is an SDP pipeline task, fetch events for the specific failed update
         if hasattr(failed_task, "pipeline_task") and failed_task.pipeline_task:
             pipeline_id = failed_task.pipeline_task.pipeline_id
             try:
                 updates = _w.pipelines.list_updates(pipeline_id=pipeline_id)
+                # Find the latest FAILED update ID for precise event filtering
+                failed_update_id = None
                 for update in updates.updates or []:
                     if update.state and "FAILED" in str(update.state):
-                        events = _w.pipelines.list_pipeline_events(
-                            pipeline_id=pipeline_id,
-                            max_results=50
-                        )
-                        result["dlt_events"] = [
-                            {"origin": e.origin, "timestamp": str(e.timestamp), "message": e.message}
-                            for e in (events.events or [])
-                            if e.message and "ERROR" in str(e.message).upper()
-                        ][:20]
+                        failed_update_id = update.update_id
+                        break  # Most recent first
+
+                if failed_update_id:
+                    # Fetch events specific to the failed update only
+                    events = _w.pipelines.list_pipeline_events(
+                        pipeline_id=pipeline_id,
+                        max_results=50,
+                        update_id=failed_update_id
+                    )
+                else:
+                    # Fallback: fetch all recent events if no failed update found
+                    events = _w.pipelines.list_pipeline_events(
+                        pipeline_id=pipeline_id,
+                        max_results=50
+                    )
+                result["sdp_events"] = [
+                    {"origin": e.origin, "timestamp": str(e.timestamp), "message": e.message}
+                    for e in (events.events or [])
+                    if e.message and "ERROR" in str(e.message).upper()
+                ][:20]
             except Exception as e:
-                result["dlt_events"] = [{"error": f"Failed to fetch DLT events: {e}"}]
+                result["sdp_events"] = [{"error": f"Failed to fetch SDP pipeline events: {e}"}]
 
     else:
         # Single-task job — fetch output directly
@@ -799,7 +817,7 @@ def execute_sandbox_metadata_run(x_center: str, sandbox_catalog: str) -> dict:
     This function:
       1. Creates a sandbox catalog `dev_sandbox_<run_id>` if not exists
       2. Copies the active mapping into the sandbox catalog
-      3. Triggers the ingestion pipeline in dry-run / validation mode
+      3. Triggers the SDP pipeline via the wrapper job for validation
       4. Returns the sandbox run ID for QA verification
 
     Returns:
@@ -816,40 +834,16 @@ def execute_sandbox_metadata_run(x_center: str, sandbox_catalog: str) -> dict:
         WHERE x_center = '{x_center}' AND is_active = true
     """)
 
-    # 3. Find the job ID for the ingestion pipeline for this x_center
-    job_name = f"PC_Ingestion_{x_center}_Bronze"
-    jobs = _w.jobs.list()
-    target_job_id = None
-    for job in jobs:
-        if job_name.lower() in (job.settings.name or "").lower():
-            target_job_id = job.job_id
-            break
-
-    if not target_job_id:
-        return {
-            "sandbox_catalog": sandbox_catalog,
-            "sandbox_run_id": "",
-            "status": "error",
-            "message": f"Job '{job_name}' not found"
-        }
-
-    # 4. Trigger the job with a sandbox catalog parameter override
+    # 3. Trigger the SDP pipeline via the wrapper job for validation
     try:
-        run_response = _w.jobs.run_now(
-            job_id=target_job_id,
-            notebook_params={
-                "target_catalog": sandbox_catalog,
-                "x_center": x_center,
-                "execution_mode": "sandbox_validation"
-            }
-        )
+        run_response = _w.jobs.run_now(job_id=SDP_PIPELINE_JOB_ID)
         sandbox_run_id = str(run_response.run_id)
-        logger.info(f"Sandbox run triggered: {sandbox_run_id} in {sandbox_catalog}")
+        logger.info(f"SDP pipeline job triggered: {sandbox_run_id} (sandbox: {sandbox_catalog})")
         return {
             "sandbox_catalog": sandbox_catalog,
             "sandbox_run_id": sandbox_run_id,
             "status": "triggered",
-            "job_id": target_job_id
+            "job_id": SDP_PIPELINE_JOB_ID
         }
     except Exception as e:
         return {
@@ -942,26 +936,52 @@ def write_technical_markdown_doc(file_path: str, content: str) -> dict:
 
 def trigger_pipeline_repair(run_id: str) -> dict:
     """
-    Fires the Databricks Jobs repair endpoint to resume the pipeline once
-    metadata and documentation dependencies are validated.
+    Fires the repair endpoint to resume the pipeline once metadata and
+    documentation dependencies are validated.
 
-    Uses repair-run with rerun_all_failed_tasks to re-execute only
-    the failed tasks with the updated metadata.
+    For pipeline_task failures: triggers SDP pipeline update directly via
+    _w.pipelines.start_update(pipeline_id=pipeline_id).
+    For notebook task failures: uses _w.jobs.repair_run() with
+    rerun_all_failed_tasks to re-execute only the failed tasks.
 
     Returns:
-        dict with keys: run_id, repair_run_id, status
+        dict with keys: run_id, repair_run_id, status, repair_type
     """
     try:
+        # Check if the failed task is a pipeline_task
+        run_info = _w.jobs.get_run(run_id=int(run_id))
+        failed_task = None
+        for task in run_info.tasks or []:
+            task_state = task.state.result_state.value if task.state else None
+            if task_state == "FAILED":
+                failed_task = task
+                break
+
+        # If failed task is a pipeline_task, trigger SDP pipeline update directly
+        if failed_task and hasattr(failed_task, "pipeline_task") and failed_task.pipeline_task:
+            pipeline_id = failed_task.pipeline_task.pipeline_id
+            update_response = _w.pipelines.start_update(pipeline_id=pipeline_id)
+            logger.info(f"SDP pipeline update triggered for pipeline {pipeline_id} (run {run_id})")
+            return {
+                "run_id": run_id,
+                "repair_run_id": str(update_response.update_id) if hasattr(update_response, 'update_id') else "",
+                "pipeline_id": pipeline_id,
+                "status": "pipeline_update_triggered",
+                "repair_type": "sdp_pipeline_update"
+            }
+
+        # Default: use job repair-run for notebook task failures
         repair_response = _w.jobs.repair_run(
             run_id=int(run_id),
             rerun_all_failed_tasks=True,
             rerun_dependent_tasks=True
         )
-        logger.info(f"Pipeline repair triggered for run {run_id}")
+        logger.info(f"Job repair triggered for run {run_id}")
         return {
             "run_id": run_id,
             "repair_run_id": str(repair_response.run_id) if hasattr(repair_response, 'run_id') else run_id,
-            "status": "repair_triggered"
+            "status": "repair_triggered",
+            "repair_type": "job_repair_run"
         }
     except Exception as e:
         return {"run_id": run_id, "repair_run_id": "", "status": "error",
@@ -1239,8 +1259,8 @@ Return JSON:
 
 class TriageAgent(BaseAgent):
     """
-    The Triage Agent interacts with Databricks Jobs API, DLT event logs,
-    and Unity Catalog lineage to:
+    The Triage Agent interacts with Databricks Jobs API, SDP pipeline
+    event logs, and Unity Catalog lineage to:
       - Fetch error traces from the failed run
       - Evaluate downstream impacts on core insurance metrics
       - Author system post-mortems (Markdown runbooks)
@@ -1277,11 +1297,11 @@ Return JSON with keys: error_class, affected_table, downstream_impact (list), po
 
         error_info = get_pipeline_error_log(run_id)
         state["error_log"] = error_info.get("error_message", "")
-        if error_info.get("dlt_events"):
-            dlt_errors = "\n".join(
-                e.get("message", "") for e in error_info["dlt_events"]
+        if error_info.get("sdp_events"):
+            sdp_errors = "\n".join(
+                e.get("message", "") for e in error_info["sdp_events"]
             )
-            state["error_log"] += f"\n\nDLT Events:\n{dlt_errors}"
+            state["error_log"] += f"\n\nSDP Pipeline Events:\n{sdp_errors}"
 
         # Compute error signature for deduplication
         error_text = state["error_log"][:1000]
@@ -1889,13 +1909,13 @@ Return JSON with keys: validation_passed, ddl_statements, uc_comment_update, tec
 
 class QAValidationAgent(BaseAgent):
     """
-    The QA & Validation Agent runs automated checks using Delta Live Tables (DLT)
+    The QA & Validation Agent runs automated checks using SDP
     expectations or Great Expectations to ensure data sanity and schema adherence
     after a metadata modification.
 
     Responsibilities:
       - Query the sandbox run output for validation results
-      - Run DLT expectation checks (expect, expect_or_drop, expect_or_fail)
+      - Run SDP expectation checks (expect, expect_or_drop, expect_or_fail)
       - Run Great Expectations suites if configured
       - Verify schema adherence in the sandbox catalog
       - Report pass/fail back to the Supervisor
@@ -1903,7 +1923,7 @@ class QAValidationAgent(BaseAgent):
 
     QA_PROMPT = """You are the QA & Validation Agent for a P&C Insurance metadata-driven platform.
 Your job is to:
-1. Validate the sandbox run results against DLT expectations.
+1. Validate the sandbox run results against SDP expectations.
 2. Check schema adherence (column types, nullability, constraints).
 3. Run data quality checks (row counts, null counts, value ranges).
 4. Generate a validation report with pass/fail status.
@@ -1948,8 +1968,8 @@ Return JSON with keys: validation_passed, failed_expectations, row_count, null_v
                 state["next_agent"] = AgentRole.BA.value
                 return state
 
-        # ── Step 2: Run DLT expectation validation queries on sandbox tables ──
-        validation_results = self._run_dlt_expectations(sandbox_catalog, x_center, layer)
+        # ── Step 2: Run SDP expectation validation queries on sandbox tables ──
+        validation_results = self._run_sdp_expectations(sandbox_catalog, x_center, layer)
 
         # ── Step 3: Run schema adherence checks ──
         schema_issues = self._check_schema_adherence(sandbox_catalog, x_center, layer)
@@ -2004,8 +2024,8 @@ Return JSON with keys: validation_passed, failed_expectations, row_count, null_v
         except Exception as e:
             return {"state": "UNKNOWN", "error": str(e)}
 
-    def _run_dlt_expectations(self, catalog: str, x_center: str, layer: str) -> dict:
-        """Run DLT expectation validation queries on sandbox tables."""
+    def _run_sdp_expectations(self, catalog: str, x_center: str, layer: str) -> dict:
+        """Run SDP expectation validation queries on sandbox tables."""
         results = {
             "passed": True,
             "failed_expectations": [],
@@ -2718,7 +2738,7 @@ def simulate_scenario_b() -> dict:
     on column 'deductible_amount' in table pc_insurance.silver.mga_policy_silver
     was violated. 1,247 rows from MGA_Feed source system (group_code='COMMERCIAL')
     contain NULL values for deductible_amount.
-    DLT expectation 'expect_deductible_not_null' FAILED.
+    SDP expectation 'expect_deductible_not_null' FAILED.
     """
 
     state = init_swarm_state(run_id=mock_run_id, trigger_source="alert")
@@ -2788,7 +2808,7 @@ def simulate_scenario_c() -> dict:
 
     mock_run_id = "894776717783670"
     mock_error = """
-    DLTValidationException: Gold layer validation failed.
+    SDPValidationException: Gold layer validation failed.
     Expectation 'loss_ratio_threshold_check' FAILED.
     Table: pc_insurance.gold.claims_kpi_gold
     Metric: loss_ratio = 547.3% (threshold max: 200%)
