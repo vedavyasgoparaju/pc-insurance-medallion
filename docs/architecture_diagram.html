@@ -65,7 +65,7 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 </g>
 <line x1="600" y1="62" x2="600" y2="85" class="arrow-bold"/>
-<text x="610" y="76" font-size="9" fill="#4a90d9" font-weight="bold">Bronze_Pipeline.py</text>
+<text x="610" y="76" font-size="9" fill="#4a90d9" font-weight="bold">SDP: Auto Loader</text>
 
 <!-- UNITY CATALOG -->
 <rect x="40" y="90" width="680" height="350" rx="8" class="group-bg" style="fill:#fafafa;stroke:#999"/>
@@ -79,8 +79,8 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 <line x1="250" y1="132" x2="290" y2="132" class="arrow-bold"/>
 <line x1="470" y1="132" x2="510" y2="132" class="arrow-bold"/>
-<text x="260" y="125" font-size="8" fill="#4a90d9">Silver_Pipeline</text>
-<text x="480" y="125" font-size="8" fill="#4a90d9">Gold_Pipeline</text>
+<text x="260" y="125" font-size="8" fill="#4a90d9">SDP: Auto CDC</text>
+<text x="480" y="125" font-size="8" fill="#4a90d9">SDP: MVs</text>
 
 <g id="comp-4" class="comp"><rect x="70" y="185" width="200" height="50" rx="5" fill="#7b68ee" stroke="#6a5acd" stroke-width="1.5" opacity="0.8"/><text x="170" y="205" class="comp-label" fill="#fff">📋 Reference Schema</text><text x="170" y="220" class="comp-sub" fill="#e6e6fa">Metadata-driven configs</text></g>
 
@@ -125,7 +125,7 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 <g id="comp-14" class="comp"><rect x="70" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="140" y="493" class="comp-label" fill="#fff">Supervisor</text><text x="140" y="507" class="comp-sub" fill="#ffe0e8">Llama 3.3 70B</text></g>
 
-<g id="comp-15" class="comp"><rect x="235" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="305" y="493" class="comp-label" fill="#fff">Triage</text><text x="305" y="507" class="comp-sub" fill="#ffe0e8">jobs.get_run()</text></g>
+<g id="comp-15" class="comp"><rect x="235" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="305" y="493" class="comp-label" fill="#fff">Triage</text><text x="305" y="507" class="comp-sub" fill="#ffe0e8">pipelines.list_events()</text></g>
 
 <g id="comp-16" class="comp"><rect x="400" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="470" y="493" class="comp-label" fill="#fff">Business Analyst</text><text x="470" y="507" class="comp-sub" fill="#ffe0e8">mapping_documents</text></g>
 
@@ -133,7 +133,7 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 <g id="comp-18" class="comp"><rect x="730" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="800" y="493" class="comp-label" fill="#fff">QA</text><text x="800" y="507" class="comp-sub" fill="#ffe0e8">calculate_dq_score</text></g>
 
-<g id="comp-19" class="comp"><rect x="895" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="965" y="493" class="comp-label" fill="#fff">Deployment</text><text x="965" y="507" class="comp-sub" fill="#ffe0e8">jobs.repair_run()</text></g>
+<g id="comp-19" class="comp"><rect x="895" y="475" width="140" height="45" rx="5" fill="#e85d75" stroke="#c04060" stroke-width="1.5"/><text x="965" y="493" class="comp-label" fill="#fff">Deployment</text><text x="965" y="507" class="comp-sub" fill="#ffe0e8">pipelines.start_update()</text></g>
 
 <line x1="210" y1="497" x2="235" y2="497" class="arrow"/>
 <line x1="375" y1="497" x2="400" y2="497" class="arrow"/>
@@ -152,11 +152,9 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 
 <g id="comp-21" class="comp"><rect x="70" y="655" width="310" height="95" rx="5" fill="#32cd32" stroke="#228b22" stroke-width="1.5" opacity="0.85"/><text x="225" y="673" class="comp-label" fill="#fff">Job 1: Agent Setup (run once)</text><text x="225" y="688" class="comp-sub" fill="#e0ffe0">7 parallel + 1 dependent, ~20 min</text><text x="225" y="702" class="comp-sub" fill="#e0ffe0">ID: 820361677269451</text><text x="225" y="716" class="comp-sub" fill="#e0ffe0">Tasks: unified_agent, domain_exp,</text><text x="225" y="728" class="comp-sub" fill="#e0ffe0">analyst_genie, swarm, dq_fn, toolkit_fn,</text><text x="225" y="740" class="comp-sub" fill="#e0ffe0">mcp_app then supervisor_agent (dependent)</text></g>
 
-<g id="comp-22" class="comp"><rect x="400" y="655" width="310" height="95" rx="5" fill="#32cd32" stroke="#228b22" stroke-width="1.5" opacity="0.85"/><text x="555" y="673" class="comp-label" fill="#fff">Job 2: Data Pipeline</text><text x="555" y="688" class="comp-sub" fill="#e0ffe0">Bronze to Silver to Gold to Swarm(on fail)</text><text x="555" y="702" class="comp-sub" fill="#e0ffe0">ID: 894776717783668</text><text x="555" y="716" class="comp-sub" fill="#e0ffe0">Param: load_type (INITIAL|INCREMENTAL)</text><text x="555" y="730" class="comp-sub" fill="#e0ffe0">autonomous_swarm: AT_LEAST_ONE_FAILED</text><text x="555" y="742" class="comp-sub" fill="#e0ffe0">Optional daily schedule</text></g>
+<g id="comp-22" class="comp"><rect x="400" y="655" width="310" height="95" rx="5" fill="#32cd32" stroke="#228b22" stroke-width="1.5" opacity="0.85"/><text x="555" y="673" class="comp-label" fill="#fff">Job 2: SDP Pipeline + Swarm</text><text x="555" y="688" class="comp-sub" fill="#e0ffe0">sdp_pipeline task then Swarm(on fail)</text><text x="555" y="702" class="comp-sub" fill="#e0ffe0">ID: 894776717783668</text><text x="555" y="716" class="comp-sub" fill="#e0ffe0">Pipeline: 1069f9f6 (Bronze+Silver+Gold)</text><text x="555" y="730" class="comp-sub" fill="#e0ffe0">autonomous_swarm: AT_LEAST_ONE_FAILED</text><text x="555" y="742" class="comp-sub" fill="#e0ffe0">Optional daily schedule</text></g>
 
-<line x1="555" y1="655" x2="160" y2="160" class="arrow"/>
 <line x1="555" y1="655" x2="380" y2="160" class="arrow"/>
-<line x1="555" y1="655" x2="600" y2="160" class="arrow"/>
 <line x1="555" y1="655" x2="965" y2="475" class="arrow-dashed"/>
 <text x="580" y="560" font-size="9" fill="#e85d75">on failure</text>
 
@@ -174,7 +172,7 @@ svg { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: vi
 <line x1="600" y1="160" x2="970" y2="660" class="arrow"/>
 <line x1="600" y1="160" x2="1095" y2="660" class="arrow-dashed"/>
 
-<text x="600" y="800" font-size="11" fill="#666" text-anchor="middle" font-style="italic">P&amp;C Insurance Medallion Architecture v4.0 · Single catalog: pc_insurance · 6 schemas · 8 AI agents · LangGraph self-healing swarm</text>
+<text x="600" y="800" font-size="11" fill="#666" text-anchor="middle" font-style="italic">P&amp;C Insurance Medallion Architecture v5.0 · Single catalog: pc_insurance · 6 schemas · 8 AI agents · SDP pipeline · LangGraph self-healing swarm</text>
 <text x="600" y="816" font-size="10" fill="#999" text-anchor="middle">Hover over any box for detailed functionality · See ARCHITECTURE.md for full documentation</text>
 
 
